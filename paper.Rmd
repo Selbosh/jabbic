@@ -16,7 +16,7 @@ abstract: |
   The published results of REF2014 include a categorical 'quality profile' for each unit of assessment (typically a university department), reporting what percentage of the unit's REF-submitted research outputs were assessed as being at each of four quality levels (labelled 4\*, 3\*, 2\* and 1\*).
   Also in the public domain are the original submissions made to REF2014, which include --- for each unit of assessment --- publication details of the REF-submitted research outputs.
 
-  In this chapter, we address the question: to what extent can a REF quality profile for research outputs be attributed to the journals in which (most of) those outputs were published?
+  In this work, we address the question: to what extent can a REF quality profile for research outputs be attributed to the journals in which (most of) those outputs were published?
 
   The data are the published submissions and results from REF2014.
   The main statistical challenge comes from the fact that REF quality profiles are available only at the aggregated level of whole units of assessment: the REF panel's assessment of each individual research output is not made public.
@@ -27,20 +27,6 @@ abstract: |
 bibliography: ../thesis/references.bib
 biblio-style: apalike
 ---
-
-<!--The Research Excellence Framework (REF) is a periodic UK-wide assessment of the quality of published research in universities.
-The most recent REF was in 2014, and the next will be in 2021.
-The published results of REF2014 include a categorical 'quality profile' for each unit of assessment (typically a university department), reporting what percentage of the unit's REF-submitted research outputs were assessed as being at each of four quality levels (labelled 4\*, 3\*, 2\* and 1\*).
-Also in the public domain are the original submissions made to REF2014, which include --- for each unit of assessment --- publication details of the REF-submitted research outputs.
-
-In this chapter, we address the question: to what extent can a REF quality profile for research outputs be attributed to the journals in which (most of) those outputs were published?
-
-The data are the published submissions and results from REF2014.
-The main statistical challenge comes from the fact that REF quality profiles are available only at the aggregated level of whole units of assessment: the REF panel's assessment of each individual research output is not made public.
-Our research question is thus an 'ecological inference' problem, which demands special care in model formulation and methodology.
-The analysis is based on logit models in which journal-specific parameters are regularized via prior 'pseudo-data'.
-We develop a lack-of-fit measure for the extent to which REF scores appear to depend on publication venues rather than research quality or institution-level differences.
-Results are presented for several research fields. -->
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(cache = TRUE, echo = FALSE, message = FALSE, warning = FALSE)
@@ -74,7 +60,7 @@ Given that the purposes of the REF are explicitly '[to] establish reputational y
 
 The popularity of journal-level citation metrics such as the impact factor raises the question: might some expert panels be influenced (consciously or otherwise) by a journal's reputation or citation count when judging an individual paper?
 
-In this chapter, we investigate the extent to which research institutions' REF ratings (for outputs) might be attributed to the journals in which their outputs were published.
+In this paper, we investigate the extent to which research institutions' REF ratings (for outputs) might be attributed to the journals in which their outputs were published.
 Paper-level ratings are missing, but the margins---institutions' REF profiles and the numbers of articles they submitted from each journal---are known, so the research question becomes an 'ecological inference' problem.
 Using both frequentist and Bayesian approaches, we will estimate latent 'quality' scores for journals, and then quantify the variation in REF results that is explained by these scores.
 We also compare these scores with published journal citation metrics.
@@ -611,7 +597,7 @@ Of these few 'invalid' DOIs, manual inspection showed the same broken DOIs to be
 For the remaining (vast majority) of DOIs, the CrossREF API returned the titles of the articles and the names and ISSNs of the containing periodicals.
 
 A small amount of data wrangling remained, however.
-Though no single DOI yielded multiple entries in the CrossREF database, our mini clustering algorithm was still required to merge journals which have multiple titles appearing in CrossRef, for example *The Review of Economic Studies* and *Review of Economic Studies*.
+Though no single DOI yielded multiple entries in the CrossRef database, our mini clustering algorithm was still required to merge journals which have multiple titles appearing in CrossRef, for example *The Review of Economic Studies* and *Review of Economic Studies*.
 These were able to be clustered by shared ISSNs (and we assume that CrossRef, at least, gets these correct).
 
 This approach can easily be applied to every field with no manual or *ad hoc* data processing necessary (except those articles with missing or invalid DOIs).
@@ -1253,7 +1239,7 @@ chemistry$JIF %>%
 Discussion
 ==========
 
-This chapter has explored the relationship between published REF2014 results and the journals in which institutions published research outputs submitted for REF2014 assessment.
+This paper has explored the relationship between published REF2014 results and the journals in which institutions published research outputs submitted for REF2014 assessment.
 The results are informative in various ways, including:
 
 - implied rankings of the main journals from which work was submitted in each REF2014 sub-panel, together with measures of uncertainty on such rankings; and
