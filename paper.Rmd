@@ -1,0 +1,1417 @@
+---
+title: "Judging a book by its cover: how much of REF 'research quality' is really 'journal prestige'?"
+author:
+  - David Antony Selby
+  - David Firth
+date: July 2020
+output: bookdown::pdf_document2
+header-includes:
+  - '\usepackage{subfig}'
+  - '\usepackage[color=yellow]{todonotes}'
+papersize: a4
+fontsize: 12pt
+abstract: |
+  \noindent The Research Excellence Framework (REF) is a periodic UK-wide assessment of the quality of published research in universities.
+  The most recent REF was in 2014, and the next will be in 2021.
+  The published results of REF2014 include a categorical 'quality profile' for each unit of assessment (typically a university department), reporting what percentage of the unit's REF-submitted research outputs were assessed as being at each of four quality levels (labelled 4\*, 3\*, 2\* and 1\*).
+  Also in the public domain are the original submissions made to REF2014, which include --- for each unit of assessment --- publication details of the REF-submitted research outputs.
+
+  In this chapter, we address the question: to what extent can a REF quality profile for research outputs be attributed to the journals in which (most of) those outputs were published?
+
+  The data are the published submissions and results from REF2014.
+  The main statistical challenge comes from the fact that REF quality profiles are available only at the aggregated level of whole units of assessment: the REF panel's assessment of each individual research output is not made public.
+  Our research question is thus an 'ecological inference' problem, which demands special care in model formulation and methodology.
+  The analysis is based on logit models in which journal-specific parameters are regularized via prior 'pseudo-data'.
+  We develop a lack-of-fit measure for the extent to which REF scores appear to depend on publication venues rather than research quality or institution-level differences.
+  Results are presented for several research fields.
+bibliography: ../thesis/references.bib
+biblio-style: apalike
+---
+
+<!--The Research Excellence Framework (REF) is a periodic UK-wide assessment of the quality of published research in universities.
+The most recent REF was in 2014, and the next will be in 2021.
+The published results of REF2014 include a categorical 'quality profile' for each unit of assessment (typically a university department), reporting what percentage of the unit's REF-submitted research outputs were assessed as being at each of four quality levels (labelled 4\*, 3\*, 2\* and 1\*).
+Also in the public domain are the original submissions made to REF2014, which include --- for each unit of assessment --- publication details of the REF-submitted research outputs.
+
+In this chapter, we address the question: to what extent can a REF quality profile for research outputs be attributed to the journals in which (most of) those outputs were published?
+
+The data are the published submissions and results from REF2014.
+The main statistical challenge comes from the fact that REF quality profiles are available only at the aggregated level of whole units of assessment: the REF panel's assessment of each individual research output is not made public.
+Our research question is thus an 'ecological inference' problem, which demands special care in model formulation and methodology.
+The analysis is based on logit models in which journal-specific parameters are regularized via prior 'pseudo-data'.
+We develop a lack-of-fit measure for the extent to which REF scores appear to depend on publication venues rather than research quality or institution-level differences.
+Results are presented for several research fields. -->
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(cache = TRUE, echo = FALSE, message = FALSE, warning = FALSE)
+options(digits = 3)
+library(dplyr)
+library(BiasedUrn)
+library(ggridges)
+library(ref2014)
+library(rstan)
+library(kableExtra)
+library(readxl)
+theme_set(theme_classic())
+```
+
+Introduction
+============
+
+The Research Excellence Framework (REF; successor to the Research Assessment Exercise, or RAE) is the method used by UK funding bodies to evaluate the quality of research.
+The last REF took place in 2014 and the next one is currently scheduled for 2021.
+Panels of experts rate universities and research institutions in three categories: impact outside academia, research environment and quality of outputs, based on written submissions.
+In the sciences and some other fields, submissions are more likely to comprise academic journal articles than books or reports [@Wilsdon2015; @Marques2017].
+
+Expert panels can judge a submission to be 'world-leading' (4\*) 'internationally excellent' (3\*), 'recognised internationally' (2\*), 'recognised nationally' (1\*) or unclassified.
+Results [published online](https://www.ref.ac.uk/2014) describe, for each subject area ('unit of assessment') the proportion of each institution's outputs that were assigned to each of these categories.
+
+Though it is publicly known which works were submitted for assessment, the ratings are only published in aggregate, by institution and subject: it is not disclosed which rating was assigned to which paper.
+Thus, it is not obvious what constitutes a '4\* paper' or which authors wrote them.
+However, rumours have long circulated about lists of '4\* journals' that peer review panels might use to help them determine the quality of articles [@Oswald2007].
+
+Given that the purposes of the REF are explicitly '[to] establish reputational yardsticks' (i.e. rank academic departments) and 'to inform the selective allocation of funding for research' [REF web site -@REF2019], it is not surprising that it has had an effect on institutional behaviour, allegedly increasing the number of staff hired on short-term contracts that coincide with the assessment period [@Jump2013], changing the way departments submit members of staff and publications for evaluation [@Marques2017] and increasing productivity just before the deadline [@Groen-Xu2017].
+
+The popularity of journal-level citation metrics such as the impact factor raises the question: might some expert panels be influenced (consciously or otherwise) by a journal's reputation or citation count when judging an individual paper?
+
+In this chapter, we investigate the extent to which research institutions' REF ratings (for outputs) might be attributed to the journals in which their outputs were published.
+Paper-level ratings are missing, but the margins---institutions' REF profiles and the numbers of articles they submitted from each journal---are known, so the research question becomes an 'ecological inference' problem.
+Using both frequentist and Bayesian approaches, we will estimate latent 'quality' scores for journals, and then quantify the variation in REF results that is explained by these scores.
+We also compare these scores with published journal citation metrics.
+
+Initially, we demonstrate the methodology on the field of economics, a relatively small and well-defined discipline, which mostly publishes its outputs in academic journals and has a well-established 'Top Five' journals that act as a baseline.
+Results will then be compared with several other, larger academic fields whose REF-submitted outputs are also mostly in the form of journal articles.
+
+Background
+==========
+
+Modelling research assessments
+------------------------------
+
+@Koya2017 suggested that there is, for some subject areas, a correlation between journal rankings and REF performance.
+Their approach computed a 'monetary value' (funding allocation) for each research output as rated in the REF, using a similar method to that described in an earlier blog post by @Reed2017.
+
+Let \(F\) be the total amount of funding awarded to an institution based on the REF,
+let \(n_3\) and \(n_4\) be the number of 3\* and 4\* outputs and
+let \(x_3\) and \(x_4\) be the respective monetary value of an output with each rating.
+According to the then Higher Education Funding Council for England (HEFCE), a 4\* output is worth four times as much as a 3\* output [@Else2015], so \(x_4 = 4x_3\).
+The numbers of outputs are known.
+Then \(F = n_3 x_3 + n_4 x_4 = n_3 x_3 + 4 n_4 x_3,\) from which we obtain
+\[x_3 = \frac{F}{n_3 + 4n_4},\]
+for a given institution and subject area.
+
+Consider the example of general engineering at the University of Cambridge.
+It was awarded \(F = \) £5,328,295 in 2015--16 as a result of its outputs submitted to the 2014 REF[^funding].
+Of the submitted outputs, 37.4% were rated 4\* and 55.8% at 3\*, for 177.2 full-time equivalent staff.
+Each staff member was allowed up to four submissions, and funding was allocated assuming that staff submitted this maximum, even if they did not.
+So the theoretical (not actual) number of outputs was \(4 \times 177.2 = 708.8\).
+Thus \(n_3 = 708.8 \times 55.8\% = 395.5104\) and \(n_4 = 708.8 \times 37.4\% = 265.0912\), from which we obtain \(x_3 =  \pounds 5328295/1455.875 =\) £3,659.86 and \(x_4 =\) £14,639.43.
+
+[^funding]: according to the HEFCE 2015--16 funding allocation tables for research
+
+<!-- https://webarchive.nationalarchives.gov.uk/20180405131948/http://www.hefce.ac.uk/funding/annallocns/1516/research/ -->
+
+From here, @Koya2017 studied the relationship between the distribution of an institution's REF scores with the venues in which the outputs were published.
+REF results do not reveal which article/submission received each rating; the data are only published in aggregate.
+@Koya2017 "identified how many of the submitted articles were in top quartile *[sic]* journals" based on impact factors published in the 2013 edition of Thomson Reuters'[^TR] *Journal Citation Reports*, and compared this proportion with the percentages of articles awarded 4\* and 3\* ratings[^SH].
+Positive correlations, where found, were weak and only present in some subject areas.
+Surprisingly, @Koya2017 did not directly compare the computed 'monetary value' of research outputs with the corresponding bibliometric indicators for each institution.
+
+[^TR]: Now operated by Clarivate Analytics
+[^SH]: As pointed out by @Hill2017, this means only a subset of journal articles are being compared with the full range of outputs submitted to the REF---not a like-for-like comparison.
+
+@Wilsdon2015 [Section 9.1] commissioned HEFCE to perform a more detailed study of the relationship between bibliometric indicators and REF scores, with privileged access to ratings at the level of the individual outputs.
+That analysis found low (\(<0.5\)) positive correlations between citation metrics and 4\* outputs, but with stronger relationships for some fields such as medicine, biology, chemistry, physics and economics.
+The strongest predictors were full-text clicks (on Scopus), number of authors, citation count (according to Google Scholar), SJR (a Scopus-published journal metric based on PageRank score), source-normalized impact per paper (a another Scopus metric, similar to a weighted impact factor), tweets, and downloads from the web site *Science Direct*.
+
+In the field of Art and Design, @Mansfield2016 ranked journals according to their popularity in REF submissions, but did not attempt to infer star ratings for the publications.
+
+@Stockhammer2017 investigated the 'grade point average'---the average star rating---of each institution in the 2014 REF, modelling it as a linear function of either the SCImago Journal Rank citation score (SJR) or of journal ratings assigned by the [Chartered Association of Business Schools][abs].
+That analysis, applied to the fields of economics, found a coefficient of determination of up to \(R^2 = 89\%\), with the 2014 log-SJR score having a statistically significant effect under their model.
+
+[abs]: https://charteredabs.org
+
+Italy's research assessment exercise, the _Valutazione Triennale della Ricerca_ (triennial research evaluation) began in 2003 with a similar remit to the UK's RAE/REF and was initially 'fully based on peer review'.
+@Franceschet2011a found positive correlations between the peer review assessments and citation metrics, but the strength of the correlation varied between fields, and was particularly weak for journal impact factor.
+The then-recently proposed \(h\)-index [@Hirsch2005] provided a better approximation.
+
+From 2004, the _Valutazione della Qualità della Ricerca_ (research quality evaluation; VQR) introduced a 'dual system of evaluation' using a combination of peer review and bibliometrics.
+The Italian National Agency for the Evaluation of the University and Research Systems (ANVUR) compared the results from each approach and found a 'more than adequate concordance', apparently justifying the decision to use bibliometrics.
+However, this conclusion has been strongly challenged by @Baccini2016, who insist the methodology was 'fatally flawed' and undermines the results for the field of economics and statistics in particular.
+
+Between the RAE2008 and REF2014, @Mryglod2015a compared departmental \(h\)-indices with performance in the RAE, finding a correlation between \(h\)-index and certain grade-point averages of RAE results.
+Using this relationship, they made predictions for the upcoming REF2014 for several institutions and fields.
+However, in a follow-up after the REF2014 results were published, @Mryglod2015b reported the predictions "failed to anticipate with any accuracy either overall REF outcomes or movements of individual institutions in the rankings relative to their positions in the previous Research Assessment Exercise".
+Thus care should be taken in trying to predict one research assessment from the results of another that took place years before.
+
+Our research is not the first attempt at producing a journal ranking from REF results for economics, let alone for academic fields in general.
+@Hole2017 used a greedy iterative algorithm to assign star ratings to individual papers (assuming these were entirely dependent on the journals in they appeared) minimizing the squared error in predicted ratings for institutions,
+\[Q = \sum_{i=1}^I \sum_{r=1}^4 N_i (p_{ir} - \hat p_{ir})^2,\]
+where \(N_i\) is the number of submissions from each institution, \(p_{ir}\) is the observed proportion of \(r\)-star submissions from that institution and \(\hat p_{ir}\) is the predicted proportion, based on the imputed ratings.
+The algorithm first assigns an arbitrary star-rating \(r\) to each journal, calculates the objective function \(Q\), then iterates over the list of journals, changing each journal's star rating to that which would decrease \(Q\) the most, terminating when a full pass over all journals produces a change in \(Q\) smaller than a pre-specified threshold.
+The analysis of @Hole2017 excluded journals with fewer than five submissions in the REF.
+Since this would result in the number of submissions no longer adding up to the total number of ratings, they assigned arbitrary ranks to these left-out journals.
+The results had a correlation of approximately \(\rho = 0.5\) with previously-published economics journal rankings.
+
+More recently, @Balbuena2018 adopted a machine learning approach, using a Bayesian additive regression tree model to predict grade point average from a range of institutional covariates, including the number of attributed documents indexed in the _Web of Science_ and the proportional intake of students from state schools.
+However this analysis focussed more on possible inequities in distribution of funding, rather than investigating an explicit journal identity effect.
+
+@Yan2017 used a Metropolis-within-Gibbs sampling regime to fit an ordinal response model to Economics & Econometrics outputs for REF2014.
+Whilst broadly similar to our approach, their framework is based on a proportional-odds cumulative probit model, which assumes a common set of thresholds between star ratings for all journals.
+In other words, the increase in difficulty of attaining a 4\* rating over a 3\* one is the same for every journal.
+Our analysis fits models for several different subjects and finds that this assumption does not hold, even for Economics & Econometrics.
+
+Ecological inference
+--------------------
+
+The previous section provided examples of limited analyses comparing some citation indices and other journal- or institution-level covariates with REF results, and of approaches to produce journal rankings from institutional scores.
+However, to our knowledge, no principled *statistical* analyses (that is, with quantified uncertainty) of the relationship between journal identities and UK research assessment have been published.
+Moreover, modelling REF ratings as a function of citation metrics is problematic; criticisms abound of certain indicators under inspection---impact factor and its variants, as well as 'alternative metrics' such as tweets and download counts [e.g. @Colquhoun2014; @MacRoberts2017].
+Instead of using a flawed and imprecise proxy such as a citation metric to analyse the relationship between publications and research assessment, one might consider modelling published REF results against the actual journal identities instead.
+The problem with this approach is that HEFCE (or since April 2018 its successor, Research England) will never publish the individual ratings given to submissions in the REF; indeed they were destroyed upon completion of the research assessment [@REF2014].
+
+We are therefore left in a quandary: how do we model the effect of journals on star ratings, if we don't know which journal articles received which ratings?
+What if we wanted to try to infer these publication-level ratings?
+This would allow us to construct a ranking of *journals*, not just institutions, from the REF results, similar to the work by @Hole2017.
+Moreover we might attempt to answer the question: is an institution's REF rating simply a function of the journals in which it published?
+Were that to be the case, it would suggest that the REF is directly measuring prestige rather than quality---a common criticism of citation indices.
+On the other hand, if an institution's REF score is *more* than the sum of its output journals then it might be used as evidence against using journal-level metrics to assess research quality.
+
+However, as already mentioned, the REF scores are aggregated by institution, not by journal.
+Journal-level scores must therefore be imputed rather than observed.
+Such a task---inferring individual-level properties from aggregate data---is known as *ecological inference* or *ecological regression* [@Goodman1953], typically applied to estimate voting behaviour in a secret ballot, when exit polls are infeasible or unreliable.
+Examples include modelling voter transitions between parties [@Brown1986] and estimating who voted for the Nazi Party in Weimar Germany [@Rosen2001].
+A detailed review of the topic is provided by @Wakefield2005.
+The following is a brief summary.
+
+Sociologists and political scientists often use the term 'ecological inference' to refer to inference on voting populations---for example, voter transitions between elections in a two-party system, or turnout for two demographics.
+
+Consider an election where, to comply with civil rights legislation, authorities in the US desire to compare turnout amongst black and white voters.
+Suppose for a given electoral district (constituency) \(i\), the demographic makeup is known with proportion \(X_i\) of the population black and the remainder white.
+Overall voter turnout, \(T_i\), is observed for a particular election but the ballot is secret, so turnout among blacks and whites, respectively \(\beta_i^b\) and \(\beta_i^w\), are unknown.
+These data yield the following \(2 \times 2\) table of proportions.
+
+Table: (\#tab:voters)Observed and unobserved proportions for a two-dimensional voter turnout model
+
+|       | Vote          | Not vote          | 
+|-------|---------------|-------------------|------------
+| Black | \(\beta_i^b\) | \(1 - \beta_i^b\) | \(X_i\)
+| White | \(\beta_i^w\) | \(1 - \beta_i^w\) | \(1 - X_i\)
+|       | \(T_i\)       | \(1 - T_i\)       | 
+
+At first glance, it may not appear that one can really glean any information about individuals only from the margins.
+Via the *method of bounds* however, we can obtain deterministic bounds on (at least one of) the parameters: black turnout \(\beta_i^b\) must be greater than \(\frac{T_i - (1-X_i)}{X_i}\) and smaller than \(\frac{T_i}{X_i}\), whilst
+white turnout \(\beta_i^w\) must be between \(\frac{T_i - X_i}{1 - X_i}\) and \(\frac{T_i}{1-X_i}\), to ensure they are valid proportions that add up to one [@Duncan1953].
+For example, if a district's population were 70% black and overall turnout were 40%, then black turnout must be in the range (14%, 57%), but white turnout could still be anywhere in (0, 100%).
+
+Unlike this limited deterministic approach to the ecological inference problem, *ecological regression* or *Goodman regression* [-@Goodman1953; -@Goodman1959] is one of the first *statistical* solutions.
+Using the identity
+\[T_i = X_i \beta_i^b + (1 - X_i) \beta_i^w,\]
+one may construct a simple linear regression model of turnout on racial proportions:
+\[\mathbb{E}[T_i|X_i] = \alpha + \beta X_i,\]
+where \(\alpha = \beta_i^w\) and \(\beta = \beta_i^b - \beta_w\).
+A notable criticism is that these voting propensities are assumed to be homogeneous over districts, regardless of the racial mix in each area.
+Moreover, least squares does not constrain these parameters to lie within the bounds described above, or even between zero and one [@Wakefield2005].
+
+@Brown1986 proposed modelling voter turnout using a convolution of Dirichlet--multinomial distributions, with the response approximated by a multivariate normal distribution.
+However, this model is sensitive to the choice of prior [@Wakefield2005].
+More recently, @King1997 combined the method of bounds with a pseudo-'likelihood' function---equivalent to an asymptotic form of the binomial distribution---and imposed a truncated bivariate normal distribution to tighten the bounds.
+This approach describes itself as 'a solution to the ecological inference problem', however this claim was criticized as overly optimistic [@Cho1998; @Freedman1999].
+
+Since then, @King1999 proposed a different solution in the form of an hierarchical Dirichlet--multinomial model where the unobserved probabilities (the voter turnouts by ethnicity) are beta-distributed latent random variables.
+For a constituency/district \(i\) with total voting-age population \(N_i\) and observed voter turnout count \(Y_i = N_i T_i\) the hierarchical model takes the form
+\[Y_i \sim \operatorname{Binomial}(N_i, T_i),\]
+where the marginal probability of voter turnout in constituency \(i\) is
+\[T_i = \sum_{j=1}^J x_{ij} \beta_i^j,\]
+with \(x_{ij}\) denoting the proportion of people of ethnicity \(j\) in constituency \(i\), and where the prior constituency-level probabilities of voter turnout, by ethnic group, are
+\[\beta_i^j \vert a_j, b_j \, \overset{\text{iid}_i}{\sim} \, \operatorname{Beta}(a_j, b_j)\]
+with hyper priors
+\[a_j, b_j \overset{\text{iid}_i} \sim \operatorname{Exp}(\lambda)\]
+and the default hyper-parameter setting \(\lambda = 0.5\).
+
+In the two-dimensional (black--white voter turnout) case described above, \(J=2\) and the middle level is
+\[T_i = X_i \beta_i^b + (1 - X_i) \beta_i^w.\]
+The model generalizes to \(J>2\) ethnic groups (or journals, in our case) and can be further extended to multiple outcomes (beyond binary 'vote or not') by replacing the beta--binomial distribution pair with a Dirichlet--multinomial [@Rosen2001].
+
+In our view, the top level of King's hierarchical model possibly adds an unnecessary random component, for the total turnout should simply be a deterministic, weighted sum of the turnout among each ethnic group.
+The election result is not an approximation of the counted votes: it *is* the counted votes.
+All that is necessary is for the \(\beta\)s to be constrained so that the sum over ethnic groups of voters adds up to the observed overall turnout.
+This is perhaps more easily said than done, however.
+
+More recent approaches to ecological inference make use of *distribution regression*, by treating the makeup of each electoral district as a probability distribution [@Flaxman2015; @Szabo2016].
+The basic idea is to project the distributions into a feature space, then fit a regularized regression model, such as kernel ridge regression, using this embedding.
+@Flaxman2015 used this technique to combine demographic and spatial information and infer the groups who voted for Barack Obama in the 2012 US presidential elections, and again for the 2016 elections [@Flaxman2016].
+
+@Rosenman2018 derived a 'heteroscedastic Gaussian' approximation to the Poisson binomial log-likelihood, via a central limit theorem, and later applied this to a large voter transition model [@Rosenman2019], which they term a *Poisson binomial generalized linear model*.
+Unlike the presidential election studies by Flaxman et al., which used Bayesian techniques, the Poisson binomial GLM is 'purely frequentist'.
+This offers the advantages of 'simpler fitting procedures, straightforward estimation of individual-level probabilities, and greater model interpretability' at the expense of reduced flexibility [@Rosenman2019].
+
+Model
+=====
+
+The REF ratings received by institutions on their outputs could be assumed to be drawn from a Poisson binomial distribution [@Poisson1837], which describes the probability of obtaining \(K\) successes in \(n\) independent but non-identically distributed Bernoulli trials, with probability mass function
+\[\operatorname{Pr}(K = k) = \sum_{A \in F_k} \prod_{i \in A} \pi_i \prod_{j \in A^c} (1 - \pi_j),\]
+ where \(F_k\) is the set of all subsets of \(k\) integers that can be selected from \(\{1, 2, \dots, n\}\), for \(n\) the number of Bernoulli trials and \(\pi_i\) the success probability of the \(i\)^th^ trial [@Wang1993].
+For our purposes, \(\pi_i\) represents the probability that an output \(i\) was awarded a particular rating, for example 4\*.
+
+The Poisson binomial is a special case of the aggregated compound multinomial model used by @Brown1986.
+That paper describes a Dirichlet-multinomial ('compound multinomial') model for the unobserved numbers of voters who switched between each of the major parties from one election to another.
+In their notation, each election featured the same set of political parties.
+The model estimates the probability, \(p_{ijk}\), that a voter for party \(i\) in constituency \(k\) becomes a voter for party \(j\).
+
+Our analogy is rather different: there are \(J\) parties at the first election, representing the journals in which the articles are published, but only two parties at the next election: '4\*' and 'not 4\*'.
+Voters are articles, and constituencies are academic institutions.
+We model the probability that an article published in a particular journal is awarded a 4\* rating, or not.
+
+Let \(x_{ij}\) denote the (known) number of articles published by institution \(i\) in journal \(j\).
+Let \(y_{ij}\) denote the (unknown) number of such articles that attained a 4\* rating in the REF, with \(0 \leq y_{ij} \leq x_{ij}\) for all \(i = 1, \dots, I\) and \(j = 1, \dots, J\).
+Let \(y_i = \sum_j y_{ij}\) denote the published number of 4\* ratings awarded to each institution and let \(x_j = \sum_i x_{ij}\) denote the total number of articles submitted from each journal.
+Then the marginal totals, \(\mathbf{Y} = (Y_1, \dots, Y_I)\), are aggregated compound multinomial (Dirichlet-Poisson-binomial) random variables with expectation
+\[\mathbf{E}(\mathbf{Y}) = \mathbf{P}^T\mathbf{x}\]
+and covariance
+\[\operatorname{cov}(\mathbf{Y}) = \operatorname{diag}(\mathbf{P}^T\mathbf{w}) - \mathbf{P}^T\operatorname{diag}(\mathbf{w})\mathbf{P},\]
+where \(\mathbf{P}\) is the \(J\)-vector of journal success probabilities[^analogy], \(\mathbf{x}=(x_1, \dots, x_J)\) is a vector of the number of articles in each journal and \(\mathbf{w}\) is a \(J\)-vector of weights \(w_j = x_j(x_j + \alpha_j)/(1 + \alpha_j)\).
+@Brown1986 note that 'election data involve more variability than a multinomial would suggest' and add the \(\alpha\) vector of \(J\) precision/dispersion parameters to account for this.
+
+[^analogy]: More generally, \(\mathbf{P}\) is a *matrix* of multinomial probabilities
+
+The variance of a Poisson binomial-distributed random variable is
+\[
+\operatorname{Var}(Y_i)=\sum_{j}(1-\pi_{j})\pi_{j} = \sum_j (\pi_j - \pi_j^2),
+\]
+which differs from the variance of the aggregate compound multinomial model only by the \(w_j\) term.
+We notice that as \(\alpha_j\) grows large, then (dropping the subscripts for the moment)
+\[\lim_{\alpha\to\infty} w
+= \lim_{\alpha\to\infty} x\left(\frac{x}{1 + \alpha} + \frac{1}{\frac1\alpha + 1}\right)
+= x,\]
+and since \(\alpha=\infty\) corresponds to the (non-compound) aggregate multinomial distribution [@Brown1986], we can see the Poisson binomial and aggregated multinomial models are equivalent.
+
+If we consider every paper grading to constitute an independent trial, with success probability dependent on the journal in which it is published (but not the institution or any paper-level characteristic), then for each institution \(i\), the number of 4\* ratings received is distributed
+\begin{equation}
+Y_i \sim \text{Poisson-Binomial}(\boldsymbol\pi),
+(\#eq:model)
+\end{equation}
+where \(\boldsymbol\pi = (\pi_1, \dots, \pi_J)\) is the vector of journal probabilities[^vecprob].
+Here the success probabilities are not identical for every publication, but they do coincide wherever two submissions are published in the same journal; if an institution submits two or more articles from the same journal then each of these articles is regarded as a separate independent trial.
+Of course, independence might be an heroic assumption here, but *ideally* one would hope the REF panels consider each article on its own merits rather than ranking them against one another.
+
+[^vecprob]: In practice, each element \(\pi_j\) is repeated \(x_{ij}\) times, representing repeated trials for the number of articles in journal \(j\) that were submitted by institution \(i\) to the REF.
+
+We can fit the model twice: firstly with 'success' defined as 4\* ratings, and secondly with success defined as 3\* *or* 4\* ratings, i.e. 3\* or better.
+As the star ratings are ordinal responses (4\* is better than 3\*, which is better than 2\* and so on), it seems reasonable to assume cumulative odds, and infer the probability of 3\* from the estimated probabilities of 4\* and of 3\*-or-better.
+Thus a journal's probability of obtaining a 3\* rating is assumed to be \[\pi_j^3 = \pi_j^{34} - \pi_j^4,\]
+where we introduce superscript notation: \(\pi_j^3\), \(\pi_j^4\) and \(\pi_j^{34}\) respectively denote journal \(j\)'s probability of accruing 3\*, 4\* and \(\geq 3^*\) ratings.
+
+This separate fitting of the model for the 4\* and 3\*-or-4\* is a key difference from the work of @Yan2017, which used a cumulative odds model with common thresholds for every journal.
+That is, under Yan's model, \(\operatorname{probit} (\pi_j^{34}) - \operatorname{probit} (\pi_j^4) = c\), a constant offset that does not depend on the journal \(j\).
+Our approach replaces \(c\) with \(c_j\), a difference that can might be distinct for every journal.
+
+On top of the likelihood \@ref(eq:model) we impose a prior on the journal success parameters,
+\begin{equation}
+  \pi_j \sim \text{Beta}\bigl( \gamma \mu, \gamma(1 - \mu) \bigr)
+  (\#eq:prior)
+\end{equation}
+for each journal \(j\), such that the mean probability of success is \(\mu\), and \(\gamma\) is a regularizing concentration parameter.
+On top of these we impose hyper-priors
+\begin{equation}
+\begin{aligned}
+    \mu &\sim \text{Uniform}(0, 1)
+    \\
+    \gamma &\sim \text{Gamma}(\tfrac1{10}, \tfrac1{20}),
+\end{aligned}
+  (\#eq:hyperprior)
+\end{equation}
+where the given hyper-parameters of the gamma distribution are the shape and rate, respectively---corresponding to a mean of 2 and variance 40.
+In principle one could set these manually, for instance setting \(\mu\) equal to the empirical mean institutional profile, but we shall try to learn them from the data.
+
+There are more differences between institutions than just the journals in which they publish, so to check for aggregation bias, we extend the model \@ref(eq:model) such that an article success depends not just on the journal parameter, but on an institutional covariate linked to the REF Environment profiles.
+In this way we might hope to detect any institutions that perform better or worse in output scores due to the quality of their research environment rather than on the journals in which they publish.
+Thus the success probability of an article from institution \(i\) in journal \(j\) is
+\begin{equation}
+  \text{log-odds}(4* | i, j) = \operatorname{logit} \pi_j + \alpha ~ \text{envir}_i
+  (\#eq:envir)
+\end{equation}
+where \(\alpha\) is a parameter to be estimated and \(\text{envir}_i\) is the proportion of 'Environment' in institution \(i\) rated 4\* (centred by subtracting the mean).
+If the \(\alpha\) is near zero, then we might conclude that output profiles depend more on the journals than on the unique characteristics of each research institution.
+
+Methods
+=======
+
+<!--### Model fitting-->
+
+We will employ two different methods to estimate the parameters of the model.
+Firstly, a Bayesian Monte Carlo method, and secondly a maximum likelihood approach using an expectation--maximization algorithm.
+This section describes the details behind each technique.
+
+Hamiltonian Monte Carlo
+-----------------------
+
+Owing to the limited computational power available at the time, @Brown1986 employed a normal approximation to the Poisson binomial model to estimate the unknown coefficients.
+The Poisson binomial distribution can also be approximated by a Poisson distribution, though the performance of this approximation is poor when the number of trials is large [@Hong2013]. 
+
+Advances in computation capacity allow us to consider a couple of different approaches of fitting a Poisson binomial model.
+The first would be to employ the probabilistic programming language Stan [@Carpenter2017; @Stan2018] to sample from the posterior distribution via Hamiltonian Monte Carlo [also known as hybrid Monte Carlo or HMC; @Duane1987].
+Because enumerating all possible sets of integers \(F_k\) is computationally infeasible, instead one can program a routine to compute the mass by enumerating with a recursive formula [@Shah1973]
+\[\operatorname{Pr}(K = k) = \begin{cases}
+\prod_{j=1}^n (1 - p_j)    &    k = 0    \\
+\frac1k\sum\limits_{j=1}^k(-1)^{j-1} \operatorname{Pr}(K = k-j) \sum\limits_{l=1}^n\left(\frac{p_l}{1 - p_l}\right)^j    &    k > 0,
+\end{cases}\]
+however this may not be numerically stable for large \(n\) [@Hong2013] unless computed on the logarithmic scale.
+
+Using such a dynamic programming algorithm on the logarithmic scale, we fit the model in Stan and report the results in Section \@ref(results).
+As a robustness check, we also consider a maximum likelihood approach, described in the next subsection.
+
+Expectation--maximization algorithm
+-----------------------------------
+
+The expectation--maximization (EM) algorithm can provide alternative maximum likelihood point estimates, albeit without any covariance estimate as a measure of uncertainty.
+
+The EM algorithm makes use of the *extended multivariate hypergeometric distribution*.
+Recall the more familiar hypergeometric distribution describes the probability that, given an urn of \(N\) balls, \(K\) of them white and \(N-K\) black, that if we draw \(n\) balls at random then \(k\) of them are white.
+The *extended* hypergeometric distribution, also known as Fisher's *noncentral* hypergeometric distribution, extends this scenario to non-uniform sampling---where the white balls are more likely to be drawn than black ones because of differences in size or weight.
+
+A multivariate hypergeometric distribution generalizes to a situation where there are more than two colours of balls and describes the probability of picking a particular mixture of colours.
+Hence, an extended multivariate hypergeometric distribution describes the probability of picking a certain mix from an urn of balls whose weights are not all equal [@McCullagh1989 pp. 260--261].
+For dimension \(d\) different colours, the probability mass function for drawing a mixture \(\mathbf{x} = (x_1,\dots,x_d)\) of \(n\) balls is
+\[f(\mathbf{x}; n, \mathbf{m}, \boldsymbol\omega) = \frac{1}{P_0} \prod_{i=1}^d {m_i \choose x_i} \omega_i^{x_i}\]
+where \(\mathbf{m}=(m_1, \dots, m_d)\) is the number of each colour of balls in the urn and \(\boldsymbol\omega = (\omega_1, \dots, \omega_d)\) are their respective weights.
+The denominator \(P_0\) is
+\[P_0 = \sum_{\mathbf{y}\in \mathcal S} \prod_{i=1}^d {m_i \choose y_i} \omega_i^{y_i}\]
+with \(\mathcal S\) denoting the set of all possible non-negative integer \(d\)-vectors \(\mathbf{y} = (y_1, \dots, y_n)\) where \(\sum_{i=1}^d y_i = n\).
+
+If the article-level ratings were known, we could fit a Rasch-like generalized linear model of the following form to estimate journal effects:
+\begin{equation}
+\text{logit}~\mathbb{E}[\operatorname{Pr}(4^*|i, j)] = \mu + \alpha z_i + \beta_j,
+(\#eq:rasch)
+\end{equation}
+for a paper by institution \(i\) in journal \(j\), where parameter \(\mu\), analogously to \@ref(eq:model), acts as a 'grand mean' intercept term, here in the logit space, and where \(z_i\) is an indicator variable for a 'pseudo-institution'.
+The latter submits an equal number of 4\* and not-4\* papers from every journal, acting as a regularizing prior on the strength of the journal effects to avoid overfitting.
+The more pseudo-papers submitted, the stronger the effect of the regularization.
+The maximum likelihood estimate for such an artificially augmented dataset is equivalent to the posterior mode with a conjugate Bayes model [@Jannarone1990].
+The optimum strength of regularization (i.e. the number of pseudo-articles augmenting the data) is determined via cross-validation, described at the end of this section.
+
+We adopt an expectation--maximization procedure as follows.
+
+1. Initialize the weights of the noncentral multivariate hypergeometric distribution.
+That is, randomly generate a probability for each journal--institution that corresponding outputs will be 4\*-rated in the REF. (We use a logit-normal distribution for this.)
+
+2. Compute the (approximate) expectation of the noncentral multivariate hypergeometric distribution with these odds [for this, we use R package `BiasedUrn` by @BiasedUrn]. This vector forms an imputation of the latent individual-level ratings.
+
+3. Fit the model described in Equation \@ref(eq:rasch). Extract coefficients from this model to get new odds for the noncentral multivariate hypergeometric distribution.
+
+4. Repeat steps 2--3 until convergence.
+
+To obtain new odds form the logistic regression model for the noncentral hypergeometric distribution, we simply use the relation
+\[\text{odds}(4^* | j) = \exp(\hat\mu + \hat\beta_j)\]
+for all journals \(j\), where \(\hat\mu\) and \(\hat\beta_j\) are the estimated parameters from the previous EM step.
+
+Our chosen prior for this model is essentially uninformative on the expected journal ranking.
+In principle, one could attempt to elicit distributions for the relative strengths of the journals, or (by asking someone who might have served on REF/RAE expert panels in the past) the probability that papers in a certain journal might accrue 4\* ratings.
+However, such an approach is not very scalable to large numbers of journals or fields, so we do not adopt it here.
+
+The cross-validation procedure works as follows.
+
+1. Randomly divide the institutions into (say) 10 groups.
+2. For each group:
+    a. Run the above expectation--maximization algorithm on data from the other 9 groups.
+    b. Use the estimated journal parameters to predict the institutional results for the held-out group.
+    c. Compute the index of dissimilarity between the predicted and actual institutional results.
+3. Repeat steps 1--2 for different levels of regularization.
+
+We seek the parameter that minimizes the index of dissimilarity (described in the next section) between the predicted institutional scores and the actual scores of the held-out institutions.
+
+Diagnostics and summary statistics
+----------------------------------
+
+To obtain a 'prediction' or fitted value from the Poisson binomial model, we take the posterior median of the journal probability estimates \(p_j\) and take them to be the proportion of the time that articles in those journals were awarded 4\*.
+
+That is, we compute
+\[\hat y_i^4 = \sum_{j=1}^J n_{ij} \hat \pi_j^4\]
+from the model fitted to 4\* outputs and
+\[\hat y_i^{34} = \sum_{j=1}^J n_{ij} \hat \pi_j^{34}\]
+from the same model fitted to a dataset of 3\* *or* 4\* outputs, where \(y_i^{34}\) denotes the number of an institution's outputs rated 3\* or better (i.e. 3\* *or* 4\*), \(\pi_j^{34}\) represents the probability that articles in journal \(j\) are awarded 3\* or better, and \(n_{ij}\) denotes the number of articles from institution \(i\) in journal \(j\).
+Hence we can compute the predicted number of 3\* outputs,
+\[\hat y_i^3 = \hat y_i^{34} - \hat y_i^4,\]
+for each institution \(i = 1, \dots, I\).
+
+Recall that our main aim is to answer the question: to what extent are REF output profiles a function of journal identities?
+In other words: given the journals in which an institution published its submissions, can we predict that institution's REF score?
+
+To determine the quality of fit of the Poisson binomial model we adopt the index of dissimilarity [@Duncan1955; @Kuha2011], which here represents the proportion of an institution's articles predicted a different rating to that observed in the REF.
+It is computed using the formula
+\[\Delta = \frac1{2N} \sum_i \bigl( |y_i^4 - \hat y_i^4| + |y_i^3 - \hat y_i^3| + |y_i^4 + y_i^3 - \hat y_i^4 - \hat y_i^3| \bigr),\]
+where \(N = \sum_i \sum_j n_{ij}\), the total number of submitted outputs.
+
+From the index of dissimilarity we propose another metric, the *redistribution of monetary reward*, based on the notion that a 4\* output is worth four times as much in research funding as a 3\* output, and outputs rated 2\* or lower accrue no direct funding at all [see e.g. @Koya2017].
+This metric describes the fraction of total monetary reward that would move between institutions if the estimated REF profiles \((\hat y_i^4, \hat y_i^3)\) were used instead of the observed profiles \((y_i^4, y_i^3)\), and is measured by
+\[\Delta_{\pounds} = {{\frac12 \sum_i m_i | r_4 (p_i^4 - \hat p_i^4) + r_3 (p_i^3 - \hat p_i^3)|} \over {\sum_i m_i (r_4 p_i^4 + r_3 p_i^3)}},\]
+where \(m_i\) is the number of full-time equivalent (FTE) staff submitted by institution \(i\) in the unit of assessment, \(\hat p_i^4 = \hat y_i^4 / \sum_j n_{ij}\), \(\hat p_i^3 = \hat y_i^3 / \sum_j n_{ij}\) and \(r_4\) and \(r_3\) are the respective monetary reward per FTE for the 4\* and 3\* components of output profiles, in arbitrary units with \(r_4 = 4 r_3\).
+(Implicitly, terms for 2\*, 1\* and unclassified outputs can appear in the above formula, but we take \(r_2 = r_1 = r_u = 0\).)
+
+The monetary index might even be combined with calculations of the kind by @Koya2017 to compute an absolute sterling figure for the amount of funding that would move institutions in a switch from the actual REF profiles to those estimated our model.
+
+Data
+====
+
+Units of assessment
+-------------------
+
+To demonstrate the method, we will first consider the 'Economics and Econometrics' unit of assessment.
+We choose this particular subject area because it is small, relatively self-contained, and a high proportion of output submissions (92%) are in the form of journal articles (rather than books, conference proceedings or other works).
+One might expect (this being a statistics PhD thesis) to look at statistical science submissions first, however these fall under the umbrella of Mathematical Sciences---along with research in probability, pure and applied mathematics and mathematical physics---which is a larger and more hetereogeneous field.
+
+From Table \@ref(tab:outputs) it is easy to see that the hard sciences (REF panels A and B) mostly submitted outputs in the form of journal articles; the arts and humanities (panel D) used other formats, and social sciences (panel C) were somewhere in between.
+A notable exception to this rule is the field of Computer Science and Informatics, where the role of academic journals is often supplanted by conference proceedings.
+
+After the initial analysis of the Economics and Econometrics sub-panel, we also examine three other REF subpanels, all from the Physical Sciences main panel, to see how they compare.
+The arts (main panel D) publish too few of their outputs as journal articles for this model to be of practical relevance.
+
+```{r outputs, results = 'asis'}
+tidy_outputs() %>%
+  group_by(uoa_name) %>%
+  summarise(n_submissions = n(),
+            journals_pc = 100 * mean(output_type == 'D'),
+            main_panel = first(main_panel)) %>%
+  arrange(main_panel, desc(journals_pc)) %>%
+  group_by(main_panel) %>%  mutate(row = row_number()) %>% ungroup() %>%
+  mutate(main_panel = ifelse(row == 1, main_panel, '')) %>%
+  select(main_panel, uoa_name, n_submissions, journals_pc) %>%
+  # knitr::kable('latex', align = 'lp{8cm}rr', digits = 1,
+  #              col.names = c('Panel',
+  #                            'Unit of assessment',
+  #                            'Outputs',
+  #                            'Journals'),
+  #              caption = 'Units of assessment in REF2014, the number of outputs submitted and the proportion of which that were classified as journal articles',
+  #              booktabs = TRUE, linesep = '') #%>%
+  # #kable_styling(latex_options = 'scale_down') %>%
+  setNames(c('Panel',
+             'Unit of assessment',
+             'Outputs',
+             'Journals')) %>%
+  xtable::xtable('Units of assessment in REF2014, the number of outputs submitted and the percentage of which that were classified as journal articles',
+                 digits = 1,
+                 align = 'lllrr',
+                 label = 'tab:outputs') %>%
+  print(booktabs = TRUE, comment = FALSE,
+        table.placement = 't',
+        size = '\\small',
+        floating.environment = 'table*',
+        include.rownames = FALSE)
+```
+
+```{r getUnitData}
+get_data_for_unit <- function(name, min_articles, abbrev = identity) {
+  outputs <- tidy_outputs() %>%
+    filter(uoa_name == name) %>%
+    mutate(doi = tolower(doi)) %>%
+    left_join(ref2014::article_metadata,
+              by = 'doi', suffix = c('.ref', '.cr'))
+  
+  top_journals <- outputs %>%
+    count(unique_journal_title) %>%
+    filter(!is.na(unique_journal_title)) %>%
+    arrange(desc(n)) %>%
+    dplyr::filter(n >= min_articles)
+  
+  aggregated <- outputs %>%
+    mutate(journal_group = case_when(
+      unique_journal_title %in% top_journals$unique_journal_title ~ unique_journal_title,
+      output_type == 'E' ~ 'Conference proceedings',
+      output_type == 'D' ~ 'Other journals',
+      TRUE ~ 'Other outputs'
+    )) %>%
+    count(institution, journal_group) %>%
+    mutate(journal_label = abbrev(journal_group))
+  # ^ Careful! Don't abbreviate journal_group directly or it may mess with
+  # the order of the journal_names
+  
+  journal_names <- aggregated %>%
+    distinct(journal_group) %>%
+    mutate(index = as.integer(as.factor(journal_group)),
+           journal_label = abbrev(journal_group))
+  
+  submission_totals <- outputs %>%
+    filter(output_type == 'D') %>%
+    group_by(unique_journal_title) %>%
+    summarise(n = n(), n_institutions = n_distinct(institution))
+  
+  results <- tidy_results(name = name) %>% filter(profile == 'Outputs')
+  
+  as.list(environment())
+}
+
+# Use `abbrev` argument to shorten long journal names for plotting/tabulation
+economics <- get_data_for_unit('Economics and Econometrics', 20,
+                               abbrev = function(x)
+                                 gsub('/Revue.*$', '', x))
+maths <- get_data_for_unit('Mathematical Sciences', 30,
+                           abbrev = function(x)
+                             gsub('Journal of the Royal Statistical Society:', 'JRSS', x) %>%
+                             gsub(':.*', '', .) %>%
+                             gsub('.* \\(Crelles Journal\\)', 'Crelles Journal', .))
+
+physics <- get_data_for_unit('Physics', 30,
+                             abbrev = function(x) gsub('Section A: .*', '', x))
+
+chemistry <- get_data_for_unit('Chemistry', 30)
+```
+
+```{r fundingData}
+funding2015 <- read_excel('qr1516.xls', skip = 6) %>%
+  select(institution = Institution,
+         ukprn = `UK Provider Reference Number`,
+         uoa_number = `Unit of assessment (UOA) number`,
+         uoa_name = `Unit of assessment (UOA) name`,
+         profile = `Sub-profile`,
+         allocation = `2015-16 Mainstream QR allocation (£) - see note`,
+         weightage = `2015-16 Model quality-weighted volume`) %>% 
+  mutate(f = allocation / weightage, t = f / 4)
+```
+
+Wrangling REF2014 data
+----------------------
+
+```{r submissions, fig.cap = 'Distribution of journal articles across journals and institutions, by unit of assessment. Some journals are much more popular than others, and not all institutions publish in the same journals', fig.subcap = c('number of submitted articles', 'number of submitting institutions'), out.width = '.9\\linewidth', fig.align = 'default', fig.height = 4, fig.width = 5, fig.ncol = 1}
+list(economics, maths, physics, chemistry) %>%
+  lapply(function(.) mutate(.$submission_totals, uoa_name = .$name)) %>%
+  bind_rows %>%
+  mutate(uoa_name = factor(uoa_name, levels = unique(uoa_name))) %>% # reorder UoAs
+  ggplot(aes(n)) + geom_histogram(bins = 20, fill = 'steelblue3') +
+  facet_wrap(~uoa_name, scales = 'free') +
+  labs(x = NULL, y = 'journal frequency')
+
+list(economics, maths, physics, chemistry) %>%
+  lapply(function(.) mutate(.$submission_totals, uoa_name = .$name)) %>%
+  bind_rows %>%
+  mutate(uoa_name = factor(uoa_name, levels = unique(uoa_name))) %>%
+  ggplot(aes(n_institutions)) + geom_histogram(bins = 20, fill = 'steelblue3') +
+  facet_wrap(~uoa_name, scales = 'free') +
+  labs(x = NULL, y = 'journal frequency')
+```
+
+In the published REF2014 submissions data, outputs are explicitly categorised into types, such as journal articles, book chapters, conference proceedings, working papers and so on.
+However, there is no sure-fire way to group together articles published in the same journal or book, as the titles are unstandardised, ISSNs, if provided, can vary between print and online editions and DOIs, where present, can be difficult to parse.
+Labour-intensive manual tagging of the data has rather little appeal, not least because it is error-prone and does not scale well to larger future data sets.
+But there is a network science solution to the problem.
+
+We coerced the output submissions data into a long-format table comprising just a journal identifier---the ISSN, ISBN, DOI or standardised journal title (coerced to lower case, with punctuation, diacritics, spaces and leading "the"s removed)---and a unique identifier for each output, then constructed an undirected bipartite graph between the journal identifiers and individual output identifiers.
+Each connected component in this graph represents a unique journal, containing outputs with a common journal title, DOI, ISSN and/or ISBN.
+Each is assigned a unique journal ID, as well as a human-readable title, the latter sampled from one of the journal title variants found in the component.
+
+Unfortunately, this methodology on the published REF data alone assumes integrity of the published data, which was later found to be lacking.
+Some administrators entered article metadata by hand, rather than retrieving it programmatically via CrossRef, as perhaps they should have done.
+This inevitably introduced human error; for example one entry that should have been from the *Annals of Mathematics* had the correct DOI, article and journal title, but the ISSN was that for the separate *Advances in Mathematics* journal, which causes the above mini-algorithm to merge the works in *Annals* and *Advances* as if they came from the same journal.
+In turn, the *Advances in Mathematics* journal was grouped with *Advances in Applied Mathematics* due to similarly careless data entry.
+Further issues were caused by journal titles that were ambiguous if not completely erroneous, for example various articles published in *Physical Review Letters*, *Physical Review A*, *Physical Review B* and so on all being given the unhelpful abbreviation *PHYS REV*.
+
+Evidently, the metadata in the published REF outputs data set cannot be trusted, except possibly the DOIs.
+To remedy this, we used the R package **rcrossref** [@rcrossref] to access CrossRef application programming interface (API), allowing retrieval of metadata associated with the 25,000 unique DOIs for the Economics & Econometrics, Mathematical Sciences, Chemistry and Physics submissions.
+All except 22 returned results.
+Of these few 'invalid' DOIs, manual inspection showed the same broken DOIs to be published on publishers' own web pages (and this was reported to CrossRef) so these were not a problem with the REF data itself.
+For the remaining (vast majority) of DOIs, the CrossREF API returned the titles of the articles and the names and ISSNs of the containing periodicals.
+
+A small amount of data wrangling remained, however.
+Though no single DOI yielded multiple entries in the CrossREF database, our mini clustering algorithm was still required to merge journals which have multiple titles appearing in CrossRef, for example *The Review of Economic Studies* and *Review of Economic Studies*.
+These were able to be clustered by shared ISSNs (and we assume that CrossRef, at least, gets these correct).
+
+This approach can easily be applied to every field with no manual or *ad hoc* data processing necessary (except those articles with missing or invalid DOIs).
+The distribution of outputs to journals and to institutions is illustrated in Figure \@ref(fig:submissions), where we can see that it is quite skewed.
+An uneven spread of journals between institutions is desirable for an ecological inference model; if every institution published in the same profile of journals then it would be impossible to learn any journal-level effect.
+
+Nevertheless, estimating several hundred journal parameters from just a few dozen institution-level observations is particularly ambitious, especially when it is evident that many journals accounted for very few submitted outputs.
+
+Ordinarily in high-dimensional data analysis, one can apply some level of regularization to the model, the exact level of regularization to be determined by, say, empirical Bayes estimation.
+However, standard techniques of 'soft' regularization do not seem to work very well for aggregated data like those found in our ecological inference problem.
+Instead we adopt a fairly pragmatic approach: any journal containing fewer than some threshold number of articles is aggregated into a single *super-journal* entitled 'Other journals'.
+We choose the threshold such that *most* (i.e. \(\geq 50\%\)) of the articles in the data fall into a named journal rather than an anonymous 'other' journal, while hopefully also keeping the number of parameters low enough to be practical for reporting and visualization.
+Conference proceedings and other non-journal outputs cannot be ignored, as the Poisson binomial model requires we account for all submitted outputs, so these publications are aggregated into their own respective 'other' categories.
+
+We apply our methodology to the Economics and Econometrics sub-panel as well as three other fields: Mathematical Sciences, Physics and Chemistry, representing three units of assessment from REF2014 main panel B.
+Biological Sciences (main panel A) was also considered, but modelling this field proved too computationally intensive, possibly due to the large number of submitted outputs (8,608) and institutions (44) or the distributions thereof.
+(This unit of assessment could still be analysed in future with a more efficient model fitting implementation.)
+
+```{r summary}
+institutions_per_uoa <- tidy_results() %>%
+  filter(uoa_name %in% c('Mathematical Sciences', 'Economics and Econometrics',
+                         'Physics', 'Chemistry')) %>%
+  group_by(uoa_name) %>%
+  summarise(n_inst = n_distinct(institution)) %>%
+  with(setNames(n_inst, uoa_name))
+```
+
+Compared to Economics and Econometrics, several times more outputs were submitted to each of these sub-panels (see Table \@ref(tab:outputs)), the vast majority of them (\(\geq 96\%\)) in the form of journal articles.
+
+Economics & Econometrics
+------------------------
+
+Our first REF sub-panel of interest, the 'Economics and Econometrics' unit of assessment, received `r nrow(economics$outputs)` publications from `r institutions_per_uoa['Economics and Econometrics']` institutions for the outputs submission.
+Of these, `r sum(economics$outputs$output_type == 'D')` were journal articles, distributed in various publications as shown in Table \@ref(tab:econJournals).
+
+Using a combination of CrossRef data and the clustering algorithm described in the previous section, eventually we were able automatically to assign the `r sum(economics$outputs$output_type == 'D')` economics outputs into `r length(unique(na.omit(economics$outputs$journal_id)))` unique journals.
+
+Setting the threshold at all Economics and Econometrics journals containing \(\geq 20\) submitted articles, we obtain the distribution shown in Table \@ref(tab:econJournals).
+There are `r sum(!unique(economics$aggregated$journal_group) %in% c('Conference proceedings', 'Other journals', 'Other outputs'))` named journals, representing over half of the total submissions.
+
+Mathematical Sciences
+---------------------
+
+After the field of economics, we study the Mathematical Sciences unit of assessment, which encompasses pure and applied mathematics, statistics and probability---though no distinction was made between these sub-fields, so the REF panel perhaps had the dubious honour of trying to assess subfields as diverse as pure mathematics and applied statistics together on the same measurement scale.
+
+Mathematical Sciences was larger than Economics & Econometrics, with `r institutions_per_uoa['Mathematical Sciences']` submitting research institutions.
+The `r nrow(maths$outputs)` Mathematical Sciences outputs, of which `r sum(maths$outputs$output_type == 'D')` were classified as journal articles, span some `r length(unique(maths$outputs$unique_journal_title))` unique scholarly journals.
+In this case, and for the remaining three sub-panels, the larger number of articles per journal necessitates a higher threshold for named journals: we increase the minimum number of submitted articles to 30 for Mathematical Sciences, Physics and Chemistry.
+This ensures that 'named' journals still provide a good representation (\(\geq 50\%\) coverage) of outputs in the data, while keeping model complexity reasonably low.
+
+Figure \@ref(fig:submissions)a suggests a similarly skewed distribution of articles across journals: many journals represented just one or two article submissions each, but a small number of mainly physical science journals had article counts in triple figures, including *Journal of Fluid Mechanics* with 254 articles and *Physical Review Letters* with 209.
+Some sub-fields appear to have published (or at least been submitted) more prolificly than others: the biggest statistical journal submission number was from *Biometrika* with 57 articles.
+See Table \@ref(tab:mathsJournals) for a full breakdown.
+
+Across institutions, the journal submissions data for Mathematical Sciences are skewed: most journals were published in by only a handful of unique institutions, but there were a small number of journals popular with nearly all of the institutions assessed by the sub-panel.
+See Figure \@ref(fig:submissions)b.
+
+Physics
+-------
+
+We now turn to Physics, with `r nrow(physics$outputs)` REF2014 outputs, of which `r sum(physics$outputs$output_type == 'D')` were journal articles in `r length(unique(physics$outputs$unique_journal_title))` unique journals, which we might expect to have some overlap with the Mathematical Sciences.
+Indeed, some `r length(intersect(physics$outputs$unique_journal_title, maths$outputs$unique_journal_title))` journal titles appear in both submissions.
+
+There were `r institutions_per_uoa['Physics']` different institutions who submitted to the Physics sub-panel for REF2014.
+
+As with Mathematical Sciences, in Physics we used a cut-off of 30 articles for a publication to be 'named' in the model, rather than aggregated under 'Other journals'.
+
+The distribution of journals by article count and across institutions, shown in Figure \@ref(fig:submissions), appear largely similar to the aforementioned subjects, but the breakdown of article counts by journal in Table \@ref(tab:physicsJournals) reveals that two journals---*Physical Review Letters* and *Monthly Notices of the Royal Astronomical Society*---were extremely strongly represented, constituting nearly 30% of all outputs.
+
+Chemistry
+---------
+
+Our fourth unit of assessment to model is Chemistry.
+The data for this field comprise `r institutions_per_uoa['Chemistry']` institutions, who submitted `r nrow(chemistry$outputs)` outputs, of which `r sum(chemistry$outputs$output_type == 'D')` were journal articles in `r length(unique(chemistry$outputs$unique_journal_title))` unique journals.
+
+The distributions of submissions, shown in Figure \@ref(fig:submissions), once again look similar to the other fields.
+As in Physics, a couple of journals stand out for containing a very high proportion of outputs: the *Journal of the American Chemical Society* and *Angewandte Chemie* together represent nearly 25% of all submitted works.
+
+Results
+=======
+
+```{r load samples}
+economics$samples <- readRDS('../ref2014-paper/stan/economics.rds')
+maths$samples <- readRDS('../ref2014-paper/stan/mathematics.rds')
+physics$samples <- readRDS('../ref2014-paper/stan/physics.rds')
+chemistry$samples <- readRDS('../ref2014-paper/stan/chemistry.rds')
+```
+
+Figure \@ref(fig:alphaDensity) represents the posterior marginal density for the parameter \(\alpha\), defined in \@ref(eq:envir) as the effect of institutions' research environments---rather than journal submissions---on the probability of their outputs attaining 4\* ratings in the REF.
+
+For Economics and Econometrics, Figure \@ref(fig:alphaDensity)a suggests there is little evidence for the environmental effect being distinct from zero, either when estimating the probabilities of journals attaining 4\* or \(\geq3^*\) ratings in the REF.
+The same was found also for Mathematical Sciences, Physics and Chemistry.
+This simple diagnostic check---for sensitivity of the results when controlling for an institution-level covariate---provides some, albeit limited, reassurance: the results appear robust to potential effects of aggregation bias, and there is no indication from this check of anything like Simpson's paradox.
+
+Trace plots for the Hamiltonian Monte Carlo runs are given in Figure \@ref(fig:traceplots), and suggest good mixing of the chains for each of the parameters.
+
+To catch any glaring errors in the results, and for a more informed interpretation of the findings (especially the implied journal rankings in each field) the initial results were presented to several senior University of Warwick academics with expertise in their respective disciplines.
+This was invaluable, for example, in spotting the conspicuous absence of *Annals of Mathematics* from the rankings, due to the aforementioned coding error in the REF2014 data.
+With such anomalies fixed, our informal panel of experts provided useful context for the final results, presented in the following sections.
+
+Economics & Econometrics
+------------------------
+
+<!--### Journal success probabilities-->
+
+Figure \@ref(fig:econLeague) provides a 'league table', in the form of a series of box plots of the marginal posterior distributions, of the estimated Economics and Econometrics journal probabilities of attaining 4\* and 3\* or 4\* ratings in the REF.
+Strikingly, the five journals considered among economists to be the 'Top Five' in their field [@Heckman2018] are near the top of this ranking as well: namely, the *American Economic Review*, *Econometrica*, *Quarterly Journal of Economics*, *Review of Economic Studies*, and even the *Journal of the Political Economy*, despite the latter only representing a handful of outputs, at `r sum(subset(economics$aggregated, journal_group == 'Journal of Political Economy')$n)` articles.
+Looking at the probability of achieving 3\* or greater (Figure \@ref(fig:econLeague)b), the top probabilities are all so close to 1 that little can be inferred from the ordering of the journals.
+
+The 95% posterior intervals are quite wide, especially for publications with fewer articles submitted in the REF, which is to be expected given the inherent uncertainty associated with estimating a large number of parameters from a small number of incomplete observations.
+
+Our journal ranking has several notable omissions: the *Journal of Labor Economics* and the *RAND Journal of Economics* are highly respected [@Sgroi2019; @Oswald2019], as are general science journals such as *Science*, *Nature* and *PNAS*.
+However none of these journals met the minimum threshold of 20 articles submitted to the REF2014 Economics & Econometrics sub-panel, so they do not appear as 'named journals' in our results.
+
+As a robustness check, Figure \@ref(fig:EMvHMC) compares Hamiltonian Monte Carlo estimated journal probabilities of attaining 4\* with the respective maximum likelihood estimates computed via the expectation--maximization algorithm (with the level of pseudo-data set (arbitrarily) at one article per journal).
+The maximum likelihood estimates come without any uncertainty quantification, but we can see a strong correlation in point estimates between the \(\beta_j\) estimates of Equation \@ref(eq:rasch) and the (logit) success probabilities corresponding to the same journals, so the general approach seems sound.
+
+```{r econLeague, fig.cap = 'Median estimated journal success probabilities in Economics and Econometrics. Shaded line segments represent 50\\% and 95\\% posterior intervals. Named journals had 20 or more articles submitted in REF2014', fig.width = 8, fig.height = 4.9, fig.subcap = c('Probability of 4*', 'Probability of 3* or 4*'), fig.sep = '\\par', warning = FALSE, fig.fullwidth = TRUE}
+stan_summarise <- function(subject, model = '4star') {
+  rstan::summary(subject$samples[[model]], 'beta')$summary %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column() %>%
+    mutate(index = as.integer(stringr::str_extract(rowname, '[[:digit:]]+'))) %>%
+    left_join(subject$journal_names, by = 'index')
+}
+
+plot_league <- function(subject, model = '4star') {
+  others <- c('Conference proceedings', 'Other journals', 'Other outputs')
+  
+  stan_summarise(subject, model) %>%
+    mutate(is_other = match(journal_group, others, 0L),
+           rank = rank(`50%`) * (is_other == 0) - is_other) %>%
+    add_row(journal_label = '', rank = 0) %>%
+    mutate(journal_label = reorder(journal_label, rank)) %>%
+    ggplot(aes(journal_label, `50%`)) +
+    geom_linerange(aes(ymin = `2.5%`, ymax = `97.5%`), colour = 'steelblue3', alpha = .2, size = 1) +
+    geom_linerange(aes(ymin = `25%`, ymax = `75%`), colour = 'steelblue3', size = 1, alpha = .4) +
+    geom_point() +
+    coord_flip() +
+    labs(x = NULL, y = NULL) +
+    theme(axis.ticks.y = element_blank())
+}
+
+plot_league(economics)
+plot_league(economics, '3or4star')
+```
+
+```{r EMvHMC, fig.cap = 'Maximum likelihood estimates of journal effects, $\\hat\\beta_j$, versus Hamiltonian Monte Carlo estimates of journal success probabilities (on a logit scale), for Economics and Econometrics, with line of best fit', fig.width = 8, fig.height = 4.9}
+if (file.exists('../ref2014-paper/stan/economicsEM.rds')) {
+  economics$EM <- readRDS('../ref2014-paper/stan/economicsEM.rds')
+} else {
+  economics$EM <- ref2014::EM$new(
+    trials = economics$aggregated %>%
+      transmute(inst = institution,
+                journal = journal_group,
+                ntrials = n),
+    totals = economics %>%
+      with(left_join(results, aggregated, by = 'institution')) %>%
+      group_by(inst = institution) %>%
+      summarise(total = round(sum(n) * first(`4*`) / 100)),
+    strength = 1)
+  
+  economics$EM$run(100)
+  saveRDS(economics$EM, '../ref2014-paper/stan/economicsEM.rds')
+}
+
+economics$EM_estimates <- economics$EM$model %>%
+  coefficients %>% stack %>%
+  setNames(c('logit', 'coefficient')) %>%
+  mutate(journal_group = gsub('^journal', '', coefficient)) %>%
+  right_join(stan_summarise(economics),
+             by = 'journal_group') %>%
+  select(journal_group, logit, mean_HMC = mean, median_HMC = `50%`)
+
+economics$EM_estimates %>%
+  ggplot() + aes(median_HMC, plogis(logit)) +
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed', alpha = .4,
+              colour = 'steelblue3') +
+  geom_point() +
+  labs(x = 'Median p(4*) from HMC', y = 'p(4*) from EM')
+```
+
+<!--### Reproducing institutional REF profiles-->
+
+```{r predictions}
+get_value_3star <- function(subject) {
+  funding2015 %>%
+    filter(uoa_name == subject$name) %>%
+    pull(t) %>%
+    mean
+}
+
+predict_institutions <- function(subject) {
+  value_3star <- get_value_3star(subject)
+  
+  lapply(subject$samples, rstan::extract, 'beta') %>%
+    setNames(c('p(4*)', 'p(3 or 4*)')) %>%
+    lapply(as.data.frame) %>%
+    bind_rows(.id = 'model') %>%
+    setNames(c('model', seq_len(ncol(.) - 1))) %>%
+    group_by(model) %>% mutate(iteration = row_number()) %>%
+    ungroup() %>%
+    tidyr::gather('index', 'beta', -model, -iteration) %>%
+    tidyr::spread(model, beta) %>%
+    mutate('p(3*)' = `p(3 or 4*)` - `p(4*)`,
+           index = as.numeric(index)) %>%
+    left_join(subject$journal_names, by = 'index') %>%
+    right_join(subject$aggregated %>% select(-journal_label),
+               by = 'journal_group') %>%
+    group_by(institution, iteration) %>%
+    summarise(y4hat = sum(n * `p(4*)`),
+              y3hat = sum(n * `p(3*)`),
+              n = sum(n)) %>%
+    left_join(subject$results, by = 'institution') %>%
+    mutate(y4 = round(`4*` * n / 100),
+           y3 = round(`3*` * n / 100),
+           delta = (abs(y4 - y4hat) + abs(y3 - y3hat) + abs(y4 + y3 - y4hat - y3hat)) / 2,
+           funding_obs = (4 * y4 + y3) * fte * value_3star / n,
+           funding_est = (4 * y4hat + y3hat) * fte * value_3star / n,
+           redist = abs(funding_obs - funding_est))
+}
+
+economics$predicted <- predict_institutions(economics)
+maths$predicted <- predict_institutions(maths)
+physics$predicted <- predict_institutions(physics)
+chemistry$predicted <- predict_institutions(chemistry)
+
+shorten_uni_names <- function(data) {
+  mutate(data,
+         label = gsub('(University of )', '', label),
+         label = gsub(' University$', '', label),
+         label = gsub('Metropolitan', 'Met', label),
+         label = plyr::revalue(label,
+           c('University College London' = 'UCL',
+             'London School of Economics and Political Science' = 'LSE',
+             'Brunel University London' = 'Brunel',
+             'Royal Holloway, London' = 'Royal Holloway',
+             'Northumbria at Newcastle' = 'Northumbria',
+             'Imperial College London' = 'Imperial',
+             'King\'s College London' = 'KCL',
+             'Queen\'s University Belfast' = 'Queen\'s',
+             'City University London' = 'City London',
+             'Birkbeck College' = 'Birkbeck',
+             'Queen Mary London' = 'QMUL',
+             'Institute of Cancer Research' = 'ICR'),
+           warn_missing = FALSE)
+  )
+}
+
+plot_predictions <- function(subject) {
+  subject$predicted %>%
+    group_by(institution) %>%
+    summarise(y4 = first(y4), y4hat = mean(y4hat), n = first(n),
+              p4 = y4 / n, p4hat = y4hat / n,
+              label = first(institution),
+              fte = first(fte)) %>%
+    shorten_uni_names() %>%
+    ggplot() + aes(p4, p4hat, label = label) +
+    geom_abline(slope = 1, intercept = 0, linetype = 'dashed', alpha = .4,
+                colour = 'steelblue3') +
+    geom_point(aes(size = fte), alpha = .4) +
+    ggrepel::geom_text_repel(size = 2.5, alpha = .4, segment.alpha = .25) +
+    labs(x = 'actual', y = 'predicted') +
+    scale_x_continuous(labels = scales::percent_format(1)) +
+    scale_y_continuous(labels = scales::percent_format(1)) +
+    expand_limits(x = 0, y = 0) +
+    scale_size_area(guide = 'none')
+}
+
+thousands_gbp <- scales::unit_format(1, 1e-3, '£', 'k', '')
+
+plot_funding <- function(subject, breaks = c(1e4, 3e4, 1e5, 3e5)) {
+  subject$predicted %>%
+    group_by(institution) %>%
+    summarise(funding_obs = mean(funding_obs),
+              funding_est = mean(funding_est),
+              label = first(institution),
+              fte = first(fte)) %>%
+    shorten_uni_names() %>%
+    ggplot() + aes(funding_obs, funding_est, label = label) +
+    geom_abline(slope = 1, intercept = 0, linetype = 'dashed', alpha = .4,
+                colour = 'steelblue3') +
+    geom_point(aes(size = fte), alpha = .4) +
+    ggrepel::geom_text_repel(size = 2.5, alpha = .4, segment.alpha = .25) +
+    labs(x = 'actual', y = 'predicted') +
+    expand_limits(x = range(breaks), y = range(breaks)) +
+    scale_x_log10(labels = thousands_gbp, breaks = breaks) +
+    scale_y_log10(labels = thousands_gbp, breaks = breaks) +
+    scale_size_area(guide = 'none')
+}
+```
+
+Figure \@ref(fig:econPredictions)a shows the predicted versus actual 4\* output profiles for each of the institutions in Economics and Econometrics.
+With the predicted 4\* and 3\* profiles converted into funding allocations, Figure \@ref(fig:econPredictions)b shows the resulting discrepancies between the predicted institutional funding versus that actually allocated [based on the methodology of @Koya2017] based on HEFCE data.
+Not all institutions are based in England, of course, so the 'actual' funding figures for other nations in the UK assume that the respective research councils used similar formulae to allocate funding based on REF2014 outputs.
+
+The quality of prediction appears reasonably good, with most points falling close to the line of \(y = x\).
+Some institutions appear to have received more 4\* ratings than predicted from their journal choices, notably Cambridge and UCL, and Queen Mary University London appears to have received fewer 4\* ratings than suggested by the model.
+Otherwise there are no noticeable outliers.
+
+When it comes to funding, Figure \@ref(fig:econPredictions)b shows how much funding would be allocated, when combining the estimated 4\* profiles with 3\* ratings and the FTE headcount for each department.
+The only institution with a significant discrepancy is Brunel, and this can be accounted for by the fact that most of that university's Economics and Econometrics outputs were published in less popular journals not named in Table \@ref(tab:econJournals), so the model has less information available to predict this institution's results.
+
+```{r econPredictions, fig.ncol = 1, fig.subcap = c('\\% articles at 4*', 'funding allocation'), fig.cap = 'Predictions versus observed REF2014 results for institutions submitting outputs to the Economics \\& Econometrics sub-panel, with point sizes proportional to number of FTE staff', fig.width = 8, fig.height = 4.9, fig.fullwidth = TRUE}
+plot_predictions(economics)
+plot_funding(economics)
+```
+
+<!--### Summary measures-->
+
+Across the four fields, we compute the index of dissimilarity, \(\Delta\), and the index of redistribution of monetary reward, \(\Delta_\pounds\).
+The distributions of these metrics are plotted in Figure \@ref(fig:indicesRidges).
+Lower numbers are better.
+
+```{r indicesRidges, fig.height = 4, fig.width = 8, fig.sep = '\\par', fig.cap = 'Density plots of indices of dissimilarity and of redistribution of monetary reward, by unit of assessment', fig.subcap = c('Index of dissimilarity', 'Index of redistribution of monetary reward'), dev = 'pdf', message = FALSE}
+calc_index_of_dissimilarity <- function(subject) {
+  subject$predicted %>%
+    group_by(iteration) %>%
+    summarise(delta = sum(delta) / sum(n), uoa_name = first(uoa_name))
+}
+
+calc_index_of_redistribution <- function(subject) {
+  value_3star <- get_value_3star(subject)
+  subject$predicted %>%
+    group_by(iteration) %>%
+    summarise(redist = .5 * sum(redist) / value_3star / sum(fte * (4 * y4 + y3) / n),
+              uoa_name = first(uoa_name))
+}
+
+list(economics, maths, physics, chemistry) %>%
+  lapply(calc_index_of_dissimilarity) %>%
+  bind_rows %>% 
+  ggplot() + aes(delta, reorder(uoa_name, desc(uoa_name))) +
+  ggridges::geom_density_ridges(fill = 'steelblue1', scale = 1.2) +
+  ggridges::theme_ridges(center_axis_labels = TRUE) +
+  labs(x = expression(Delta), y = NULL) +
+  scale_x_continuous(expand = c(0.01, 0), limits = 0:1) +
+  scale_y_discrete(expand = c(0.01, 0))
+
+list(economics, maths, physics, chemistry) %>%
+  lapply(calc_index_of_redistribution) %>%
+  bind_rows %>% 
+  ggplot() + aes(redist, reorder(uoa_name, desc(uoa_name))) +
+  ggridges::geom_density_ridges(fill = 'steelblue1', scale = 1.2) +
+  ggridges::theme_ridges(center_axis_labels = TRUE) +
+  labs(x = expression(Delta['£']), y = NULL) +
+  scale_x_continuous(expand = c(0.01, 0), limits = 0:1) +
+  scale_y_discrete(expand = c(0.01, 0))
+
+mean_deltas <- list(economics, maths, physics, chemistry) %>%
+  lapply(calc_index_of_dissimilarity) %>%
+  bind_rows %>%
+  group_by(uoa_name) %>%
+  summarise(delta = mean(delta))
+
+mean_redist <- list(economics, maths, physics, chemistry) %>%
+  lapply(calc_index_of_redistribution) %>%
+  bind_rows %>%
+  group_by(uoa_name) %>%
+  summarise(redist = mean(redist))
+```
+
+The median value for Economics and Econometrics is \(\Delta = `r round(with(mean_deltas, delta[uoa_name == 'Economics and Econometrics']) * 100, 1)`\%\), that is, this proportion of articles would need to be reclassified for the estimated institutional profiles to match exactly those published in the REF.
+As a metric, `r round(with(mean_deltas, 1 - delta[uoa_name == 'Economics and Econometrics']) * 100, 1)`% accuracy sounds like it might be quite good, but we should be careful not to draw too many conclusions from a single number.
+In funding terms, that translates to \(\Delta_\pounds = `r round(with(mean_redist, redist[uoa_name == 'Economics and Econometrics']) * 100, 1)`\%\) of funding in Economics and Econometrics needing to be reallocated if an initial allocation was made based on the Poisson binomial model alone.
+Across dozens of institutions, that represents a substantial amount of money, though.
+
+<!--Cumulative probit differences-->
+
+Figure \@ref(fig:Yan) provides evidence against the model of @Yan2017, which assumed a constant cumulative probit difference between the probability of getting 4\* and the probability of getting 3\* or better.
+It is clear that 'better' journals (those more likely to attain 4\*) have a smaller cumulative probit difference, suggesting that it is not much harder for an output in such an apparently high-achieving journal to get a 4\* than a 3\* rating, whereas for 'weaker' journals, it is harder to improve from 3\* to 4\*.
+
+(ref:Yancaption) Comparison of cumulative probit differences, \(c_j = \operatorname{probit}(p_j^{34}) - \operatorname{probit}(p_j^4)\), versus estimated probit probability of attaining 4\*, by journal in Economics and Econometrics in REF2014, with line of best fit. A non-zero slope implies \(c_j \neq c\), that the cumulative probit difference is not constant across journals
+
+```{r Yan, fig.width = 8, fig.height = 6, fig.cap = '(ref:Yancaption)', fig.fullwidth = TRUE}
+Title_Case <- function(string) {
+  sapply(strsplit(string, ' '),
+         function(words) {
+           paste(ifelse(grepl('^(of|the|and)$', words),
+                        substring(words, 1, 1),
+                        toupper(substring(words, 1, 1))),
+                 substring(words, 2),
+                 sep = '', collapse = ' ')
+         })
+}
+
+# Comparison with Yan's probit model [@Yan2017]
+lapply(economics$samples, rstan::extract, 'beta') %>%
+  setNames(c('p(4*)', 'p(3 or 4*)')) %>%
+  lapply(as.data.frame) %>%
+  bind_rows(.id = 'model') %>%
+  setNames(c('model', seq_len(ncol(.) - 1))) %>%
+  group_by(model) %>% mutate(iteration = row_number()) %>%
+  ungroup() %>%
+  tidyr::gather('index', 'beta', -model, -iteration) %>%
+  tidyr::spread(model, beta) %>%
+  mutate(a_j = qnorm(`p(4*)`),
+         c_j = qnorm(`p(3 or 4*)`) - a_j,
+         index = as.integer(index)) %>%
+  group_by(index) %>% summarise(a_j = mean(a_j), c_j = mean(c_j)) %>%
+  left_join(economics$journal_names, by = 'index') %>%
+  mutate(label = journal_label %>%
+           gsub('(ournal\\b|^The\\b|of|pean|\\bthe )', '', .) %>%
+           gsub('and', '&', .) %>%
+           gsub('Review', 'Rev', .) %>%
+           gsub('(Economics|Economic|Economy)', 'Econ', .) %>%
+           gsub('  ', ' ', .)) %>%
+  ggplot() + aes(a_j, c_j) +
+  geom_point() + geom_smooth(method = 'lm', se = FALSE, colour = 'steelblue2') +
+  ggrepel::geom_text_repel(aes(label = label), size = 3, alpha = .3) +
+  labs(x = 'probit p(4*)', y = 'Cumulative probit difference')
+```
+
+Mathematical Sciences
+---------------------
+
+<!--### Journal success probabilities-->
+
+In Mathematical Sciences, we face the problem of several partly disjointed sub-fields, such as pure mathematics, statistics, mathematical physics and mathematical biology, all falling under the same umbrella.
+As a result it is harder to gauge what might be considered a group of 'top' mathematical sciences journals---mathematicians might declare that statistics, for example, is merely applied mathematics and that a pure mathematics journal should lead the field [@xkcd2008] whilst statisticians might counter that statistical journals should come top because of the widespread application of statistics.
+It is perhaps surprising, then, that some of the reputed top journals in statistics, *Annals of Statistics*, *Biometrika* and the *Journal of the Royal Statistical Society: Series B* [@Varin2016] are still ranked highly based on the model for attaining 4\* ratings in the REF.
+See Figure \@ref(fig:mathLeague).
+However, the *Journal of the American Statistical Association*, also a highly-regarded statistics journal, has a low estimated probability of obtaining 4\* ratings.
+
+For the mathematicians, *Inventiones Mathematicae* and *Annals of Mathematics* are both highly reputed and have the highest estimated probabilities of yielding 4\* ratings in the REF.
+The *Journal of the American Mathematical Society* and *Publications Mathémathiques de l'IHÉS* are also highly regarded [@Loeffler2019], but do not appear in the results as named journals because fewer than 30 of their respective articles were submitted to the REF.
+
+```{r mathLeague, fig.cap = 'Median estimated journal success probabilities of 4* ratings in Mathematical Sciences. Shaded line segments represent 50\\% and 95\\% posterior intervals. Named journals had 30 or more articles submitted in REF2014', fig.width = 8, fig.height = 9.8, warning = FALSE, fig.fullwidth = TRUE}
+plot_league(maths)
+```
+
+```{r mathLeague2, fig.cap = 'Median estimated journal success probabilities of 3* or 4* ratings in Mathematical Sciences. Shaded line segments represent 50\\% and 95\\% posterior intervals. Named journals had 30 or more articles submitted in REF2014', fig.width = 8, fig.height = 9.8, warning = FALSE, fig.fullwidth = TRUE}
+plot_league(maths, model = '3or4star')
+```
+
+<!--### The fit to published REF results-->
+
+In Mathematical Sciences, the predicted versus allocated 4\* ratings and funding allocations, by institution, are presented in Figure \@ref(fig:mathPredictions).
+Apparent outliers (such as Coventry University or the University of Greenwich in the 4\* plot) are among the smallest institutions by number of full-time equivalent (FTE) research staff.
+There appears to be a pattern, however: weaker institutions are expected to do better, and stronger institutions are expected to do worse, than their actual published performance in the REF.
+
+This shrinkage effect implies that some variation in assessed quality of outputs is not explained by journal identities alone.
+It indicates that there is variation in quality within at least some journals, and that high-ranked institutions tend to publish more of the high-quality papers in such journals.
+
+```{r mathPredictions, fig.sep = '\\par', fig.subcap = c('\\% articles at 4*', 'funding allocation'), fig.cap = 'Predictions versus observed REF2014 results for institutions submitting outputs to the Mathematical Sciences sub-panel, with point sizes proportional to number of FTE staff', fig.width = 8, fig.height = 4.9, fig.fullwidth = TRUE}
+plot_predictions(maths)
+plot_funding(maths)
+```
+
+In terms of summary measures, the median index of dissimilarity for Mathematical Sciences is \(`r round(with(mean_deltas, delta[uoa_name == 'Mathematical Sciences']) * 100, 1)`\%\) and the median required redistribution of monetary reward is \(`r round(with(mean_redist, redist[uoa_name == 'Mathematical Sciences']) * 100, 1)`\%\); the posterior distributions of these statistics are plotted in Figure \@ref(fig:indicesRidges).
+
+Physics
+-------
+
+<!--### Journal success probabilities-->
+
+Posterior probabilities for the Physics sub-panel are presented in Figure \@ref(fig:physLeague).
+Journals from Nature Publishing Group have the highest estimated probabilities of attaining 4\*, though no probabilities are near 100%, perhaps owing to the relatively small number of 4\* ratings awarded in this field generally.
+The appearance of *Physics Review Letters* above the *Proceedings of the National Academy of Sciences (PNAS)* in the ranking might imply a preference by physicists in the review panel for physics-specific journals over general science ones.
+In the international astrophysics community, *Astrophysical Journal* might be considered more prestigious than *Monthly Notices of the Royal Astronomical Society*, but the latter has a slightly higher estimated probability of 4\*, which might be interpreted as a UK-centric bias [@Ball2019].
+Relatively low success probabilities for *Physics Review B* and *C* could be attributed to an inter-journal dependence: namely, some works published in these journals also being announced in the highly-ranked *Physical Review Letters*.
+
+```{r physLeague, fig.cap = 'Median estimated journal success probabilities of 4* ratings in Physics. Shaded line segments represent 50\\% and 95\\% posterior intervals. Named journals had 30 or more articles submitted in REF2014', fig.width = 8, fig.height = 4.9, fig.subcap = c('Probability of 4*', 'Probability of 3* or 4*'), fig.sep = '\\par', warning = FALSE, fig.fullwidth = TRUE}
+plot_league(physics)
+plot_league(physics, model = '3or4star')
+```
+
+<!--### The fit to the published REF results-->
+
+As in Mathematical Sciences, a comparison of the predicted versus actual institutional REF results in Physics, shown in Figure \@ref(fig:physPredictions), reveals a linear relationship, but an apparent shrinkage effect, implying some variation in assessed quality not explained by journal identities.
+The performance of the University of Oxford, in particular, appears to be under-estimated by the model, suggesting that where there is variation of assessed quality within journals, the higher-quality outputs may be more likely to have been from Oxford researchers.
+
+```{r physPredictions, fig.sep = '\\par', fig.subcap = c('\\% articles at 4*', 'funding allocation'), fig.cap = 'Predictions versus observed REF2014 results for institutions submitting outputs to the Physics sub-panel, with point sizes proportional to number of FTE staff', fig.width = 8, fig.height = 4.9, fig.fullwidth = TRUE}
+plot_predictions(physics)
+plot_funding(physics)
+```
+
+By summary measures, the median index of similarity in Physics is \(`r round(with(mean_deltas, delta[uoa_name == 'Physics']) * 100, 1)`\%\) and the median proportion of reallocated research funding is \(`r round(with(mean_redist, redist[uoa_name == 'Physics']) * 100, 1)`\%\).
+
+Chemistry
+---------
+
+<!--### Journal success probabilities-->
+
+Figure \@ref(fig:chemLeague) provides league tables of estimated journal REF success probabilities in Chemistry.
+This field, unlike the others studied here, seems to be dominated by popular general science outlets, in *PNAS*, *Nature* and *Science*, rather than dedicated chemistry journals.
+There may be some dependence on types of articles published: some periodicals print different mixtures of 'full' research papers and communications (letters).
+*Nature Chemistry* and *Nature Communications* fall lower in the ranking than might be expected [@Bugg2019; @Scott2019].
+This appears to be simply a result of work published in journals being submitted by several low-scoring institutions that were not awarded many 4\* ratings in the REF.
+
+```{r chemLeague, fig.cap = 'Median estimated journal success probabilities of 4* ratings in Chemistry. Shaded line segments represent 50\\% and 95\\% posterior intervals. Named journals had 30 or more articles submitted in REF2014', fig.width = 8, fig.height = 6, fig.subcap = c('Probability of 4*', 'Probability of 3* or 4*'), fig.sep = '\\par', fig.fullwidth = TRUE, out.width = '.8\\linewidth'}
+plot_league(chemistry)
+plot_league(chemistry, '3or4star')
+```
+
+<!--### The fit to the published REF results-->
+
+The expected versus actual institutional results are plotted in Figure \@ref(fig:chemPredictions).
+The pattern around the line of \(y=x\) is similar to that in the other sub-panels: broadly a linear relationship, but with lower-scoring institutions having higher predicted than actual results, and the converse for stronger institutions.
+There are no noticeable outliers.
+
+```{r chemPredictions, fig.subcap = c('\\% articles at 4*', 'funding allocation'), fig.sep = '\\par', fig.cap = 'Predictions versus observed REF2014 results for institutions submitting outputs to the Chemistry sub-panel, with point sizes proportional to number of FTE staff', fig.width = 8, fig.height = 4.9, fig.fullwidth = TRUE}
+plot_predictions(chemistry)
+plot_funding(chemistry)
+```
+
+By summary measures, the median index of similarity in Chemistry is \(`r round(with(mean_deltas, delta[uoa_name == 'Chemistry']) * 100, 1)`\%\) and the median proportion of research funding that would need to be reallocated would be \(`r round(with(mean_redist, redist[uoa_name == 'Chemistry']) * 100, 1)`\%\).
+The posterior distributions are plotted in Figure \@ref(fig:indicesRidges).
+Performance, according to these metrics, appears similar to for other fields.
+
+Comparison with Journal Impact Factors
+--------------------------------------
+
+Using data from Clarivate Analytics' *Journal Citation Reports*, we can compare the latent journal REF effects with journal impact factors for the respective year.
+For this article, we use the 2014 edition of *Journal Citation Reports*, as this is based on citation data from the preceding two years.
+(One could also consider the 2013 edition, though the results should not be too different.)
+
+It may also be possible to compare with rival metrics, such as the CiteScore and Scimago Journal Rank (SJR), Scopus's versions of the impact factor and the Eigenfactor, respectively, however we do not make those comparisons here.
+
+Economics & Econometrics {-}
+----------------------------
+
+Comparisons are plotted in Figure \@ref(fig:impactfactor).
+Note the logarithmic scale for the Eigenfactor score.
+Broadly speaking, there is a (weak) positive correlation between both citation metrics and the probability of attaining 4\* in the REF.
+Evidence for the supposed dominance of the 'top 5' economics journals is mixed.
+Whilst these periodicals are indeed highly ranked by journal impact factor, Eigenfactor and apparent REF effect, they do not completely dominate the top five spots, so their reputation must depend on other factors or perhaps be undeserved.
+Moreover, as economists have explicitly known of the 'top 5' designation for years, it may be a self-fulfilling prophecy.
+
+```{r impactfactor, fig.cap = 'Comparison of Economics and Econometrics journals\' estimated probabilities of attaining 4* in the REF, versus Clarivate journal citation metrics, with line of best fit. So-called \'top 5\' journals are highlighted in red', fig.subcap = c('Journal impact factor (2014)', 'Eigenfactor (2014)'), out.width = '0.5\\linewidth', fig.width = 4, fig.height = 4}
+JCR2014 <- read.csv('../ref2014-paper/JCR2014.csv', skip = 1, stringsAsFactors = FALSE,
+                    na.strings = 'Not Available') %>%
+  head(-2) %>% # Get rid of copyright notice at the end of the file
+  mutate(ISSN = gsub('-', '', ISSN),
+         JCR_key = row_number(),
+         top5 = ISSN %in% c('00335533', '00129682', '00028282', '00223808', '00346527')) %>%
+  tidyr::gather(TitleKey, TitleValue, Full.Journal.Title, JCR.Abbreviated.Title) %>%
+  mutate(volume_std = ref2014:::standardise_volume_title(TitleValue))
+
+merge_impact_factor <- function(subject) {
+  JCR2014 %>%
+    merge(subject$outputs, by = 'volume_std', all.x = TRUE) %>%
+    distinct(unique_journal_title, .keep_all = TRUE) %>%
+    inner_join(stan_summarise(subject),
+               by = c(unique_journal_title = 'journal_group'))
+}
+
+economics$JIF <- merge_impact_factor(economics)
+maths$JIF <- merge_impact_factor(maths)
+physics$JIF <- merge_impact_factor(physics)
+chemistry$JIF <- merge_impact_factor(chemistry) ###############
+
+economics$JIF %>%
+  ggplot() + aes(Journal.Impact.Factor, `50%`) +
+  geom_smooth(method = lm) +
+  geom_point(aes(colour = top5)) +
+  scale_colour_manual(values = c('FALSE' = 'black', 'TRUE' = 'tomato2'),
+                      guide = FALSE) +
+  labs(x = 'Impact factor', y = 'Median p(4*)')
+
+economics$JIF %>%
+  ggplot() + aes(Eigenfactor.Score, `50%`) +
+  geom_smooth(method = lm) +
+  geom_point(aes(colour = top5)) +
+  scale_colour_manual(values = c('FALSE' = 'black', 'TRUE' = 'tomato2'),
+                      guide = FALSE) +
+  scale_x_log10(breaks = 10^(-4:4),
+                labels = scales::trans_format('log10', scales::math_format(10^.x))) +
+  labs(x = 'Eigenfactor', y = 'Median p(4*)')
+```
+
+Mathematical Sciences {-}
+-------------------------
+
+In Mathematical Sciences, however, there is almost no correlation between journal impact factor and the estimated probability of 4\* in the REF; see Figure \@ref(fig:mathsJIF).
+This phenomenon could partly be explained by mathematical journals generally receiving lower impact factors; mathematics papers tend to have short reference lists and take longer to be noticed, when compared with publications in microbiology and other applied disciplines, so the journal impact factor (roughly speaking, counting citations over two years) is an especially poor metric for mathematics work.
+Most mathematics journals here had an impact factor of around 1 or 2, so most of the variation between those scores might be attributed to random noise---see the left hand side of Figure \@ref(fig:mathsJIF)a.
+
+```{r mathsJIF, fig.cap = 'Comparison of Mathematical Sciences journals\' estimated probabilities of attaining 4* in the REF, versus Clarivate journal citation metrics, with line of best fit', fig.subcap = c('Journal impact factor (2014)', 'Eigenfactor (2014)'), out.width = '0.5\\linewidth', fig.width = 4, fig.height = 4}
+maths$JIF %>%
+  ggplot() + aes(Journal.Impact.Factor, `50%`) +
+  geom_smooth(method = lm) +
+  geom_point() +
+  labs(x = 'Impact factor', y = 'Median p(4*)')
+
+maths$JIF %>%
+  ggplot() + aes(Eigenfactor.Score, `50%`) +
+  geom_smooth(method = lm) +
+  geom_point() +
+  scale_x_log10(breaks = 10^(-4:4),
+                labels = scales::trans_format('log10', scales::math_format(10^.x))) +
+  labs(x = 'Eigenfactor', y = 'Median p(4*)')
+```
+
+Physics {-}
+-----------
+
+A positive correlation is present between Clarivate citation metrics and estimated probability of 4\* for Physics as illustrated in Figure \@ref(fig:physicsJIF).
+
+```{r physicsJIF, fig.cap = 'Comparison of Physics journals\' estimated probabilities of attaining 4* in the REF, versus Clarivate journal citation metrics, with line of best fit', fig.subcap = c('Journal impact factor (2014)', 'Eigenfactor (2014)'), out.width = '0.5\\linewidth', fig.width = 4, fig.height = 4}
+physics$JIF %>%
+  ggplot() + aes(Journal.Impact.Factor, `50%`) +
+  geom_smooth(method = lm) +
+  geom_point() +
+  labs(x = 'Impact factor', y = 'Median p(4*)')
+
+physics$JIF %>%
+  ggplot() + aes(Eigenfactor.Score, `50%`) +
+  geom_smooth(method = lm) +
+  geom_point() +
+  scale_x_log10(breaks = 10^(-4:4),
+                labels = scales::trans_format('log10', scales::math_format(10^.x))) +
+  labs(x = 'Eigenfactor', y = 'Median p(4*)')
+```
+
+Chemistry {-}
+-------------
+
+The story for Chemistry is hard to interpret because so many journals have median estimated 4\* probabilities close to zero.
+But the top three journals by impact factor were also estimated to have the highest chances of their articles attaining 4\* in the REF.
+See Figure \@ref(fig:chemistryJIF).
+
+```{r chemistryJIF, fig.cap = 'Comparison of Chemistry journals\' estimated probabilities of attaining 4* in the REF, versus Clarivate journal citation metrics, with line of best fit', fig.subcap = c('Journal impact factor (2014)', 'Eigenfactor (2014)'), out.width = '0.5\\linewidth', fig.width = 4, fig.height = 4}
+chemistry$JIF %>%
+  ggplot() + aes(Journal.Impact.Factor, `50%`) +
+  geom_smooth(method = lm) +
+  geom_point() +
+  labs(x = 'Impact factor', y = 'Median p(4*)')
+
+chemistry$JIF %>%
+  ggplot() + aes(Eigenfactor.Score, `50%`) +
+  geom_smooth(method = lm) +
+  geom_point() +
+  scale_x_log10(breaks = 10^(-4:4),
+                labels = scales::trans_format('log10', scales::math_format(10^.x))) +
+  labs(x = 'Eigenfactor', y = 'Median p(4*)')
+```
+
+Discussion
+==========
+
+This chapter has explored the relationship between published REF2014 results and the journals in which institutions published research outputs submitted for REF2014 assessment.
+The results are informative in various ways, including:
+
+- implied rankings of the main journals from which work was submitted in each REF2014 sub-panel, together with measures of uncertainty on such rankings; and
+
+- for each REF2014 sub-panel studied, measurement of the *maximum* extent to which REF2014 outcomes can be explained (retrospectively) by the identities of the journals from which work was submitted by each institution.
+
+One reassuring aspect of the journal rankings derived for the four disciplines studied here is that they broadly agree with the informed opinions (informally elicited) of senior Warwick academics in those disciplines.
+That is to say, for the main 'named' journals in each field, the estimates and uncertainty intervals for the journals' probabilities of attaining 4\* ratings in REF2014 made sense in the minds of the experts who were consulted.
+Had the opposite been found, it would have been a strong reason to distrust the statistical methodology used here.
+
+Our analysis of four disciplines found that in each of them there is---as expected---a strong or very strong relationship between the composition of journals seen in an institution's REF2014 submission and its published REF2014 Outputs profile results.
+
+Naïvely, one might infer that the REF could therefore be replaced---at least for some disciplines---by a more automated 'algorithmic' assessment that assigns quality ratings based on the journal in which each piece of research is published, rather than on an expert panel's reading of the work itself.
+However, such an interpretation would not be justified.
+As well as the potential for such an algorithmic approach to produce undesirable changes in behaviour, it is important to emphasise two aspects of our analysis.
+Specifically:
+
+1. The analysis performed here is *retrospective*, not predictive. The question asked, in each discipline, was effectively: if we imagine that the REF2014 panel based its assessments on journal identities alone, then what set of 'journal quality' scores would yield the best match with the actual published REF2014 results?
+How good would such a 'best match' be?
+The implied 'journal quality' scores in our analysis came directly from the REF2014 *results*; they were not known in advance by the REF panel, nor were they based on any explanatory covariates other than the journal identities themselves.
+
+2. Although strong correlation was found between REF outcomes and aggregated 'journal quality' scores (see Figures \@ref(fig:econPredictions), \@ref(fig:mathPredictions), \@ref(fig:physPredictions) and \@ref(fig:chemPredictions)), there is a clear *pattern* of deviation from that relationship, for each of the disciplines studied here.
+The 'top' institutions are seen typically to do better in REF2014 than their aggregated 'journal quality' scores would suggest; and conversely institutions at the other end of the scale tend to do worse, relative to purely journal-based scores.
+This indicates that REF assessment panels are in fact doing more than simply using journal identity to determine research quality.
+This finding is unsurprising: the published remit of REF panels is to *read* the submitted research and evaluate its quality against clearly stated criteria.
+With that in mind, it is fully to be expected that a diligent REF panel will distinguish the 'best' papers in each journal from those papers that are more ordinary.
+
+It could perhaps still be argued that the relationship between journal-based scores and REF outcomes is sufficiently strong that deviations from it could be ignored, in the interest of reducing the overall cost of the REF exercise.
+But the clear *pattern* of deviation described in point 2 implies that the resulting redistribution (of research funding, but also prestige) would systematically disadvantage those institutions where predominantly top-quality research is done.
+While such redistribution of funds might represent a fairly modest fraction of the national funding total, its effects would systematically be concentrated in a few institutions at opposite ends of the scale.
+
+Furthermore, the notion of judging work based on the container in which it is published, rather than on its own merits, seems to miss the point of research assessment entirely.
+As @Traag2019 points out, by relying on metrics, even those which correlate strongly with peer review results, 'the goal of fostering "high quality" science may become displaced by the goal of obtaining a high metric' and have unintended consequences such as 'favouring problematic research methods'.
+
+More pragmatically, there is nothing to say that the esteem of academic journals in 2014 will remain constant until 2021.
+Editors and authors change and publications can go defunct or start anew in such a long period.
+Mryglod et al. [-@Mryglod2015a; -@Mryglod2015b] already showed that one research assessment exercise cannot necessarily be used to predict the next.
+
+Perhaps the most interesting avenue for future research would be to apply these methods to *all* subject areas in the REF and determine which fields are most beholden to the effect of journals on institutional rankings.
+Data for all 36 units of assessment in the REF are readily available, and it should be straightforward to apply the methods developed here to those other fields.
+With the 2021 REF approaching, this could be a topic of interest to many in academia, publishing and research assessment.
+As seen in Table \@ref(tab:outputs), however, subjects in the hard sciences tend to submit to scholarly journals more than other fields, such as the arts, who may produce books or artefacts, so the methodology would need to be adapted carefully for such areas, if indeed it can be applied at all.
+
+# (APPENDIX) Appendix {-}
+
+# Appendix
+
+```{r econJournals}
+economics$aggregated %>%
+  group_by(journal_label) %>%
+  summarise(n = sum(n)) %>%
+  mutate(p = 100 * n / sum(n),
+         is_other = match(journal_label,
+                          c('Conference proceedings', 'Other journals', 'Other outputs'),
+                          0L),
+         rank = rank(p) * (is_other == 0) - is_other) %>%
+  arrange(desc(rank)) %>%
+  select(-is_other, -rank) %>%
+  knitr::kable(col.names = c('Volume title', 'Outputs', '%'),
+               caption = 'Distribution of Economics and Econometrics REF2014 submissions by containing journal (named titles contained $\\geq 20$ submissions)',
+               booktabs = TRUE, digits = 1) %>%
+  kable_styling()
+```
+
+```{r physicsJournals}
+physics$aggregated %>%
+  group_by(journal_label) %>%
+  summarise(n = sum(n)) %>%
+  mutate(p = 100 * n / sum(n),
+         is_other = match(journal_label,
+                          c('Conference proceedings', 'Other journals', 'Other outputs'),
+                          0L),
+         rank = rank(p) * (is_other == 0) - is_other) %>%
+  arrange(desc(rank)) %>%
+  select(-is_other, -rank) %>%
+  knitr::kable(col.names = c('Volume title', 'Outputs', '%'),
+               caption = 'Distribution of Physics REF2014 submissions by containing journal (named titles contained $\\geq 30$ submissions)',
+               booktabs = TRUE, digits = 1) %>%
+    kable_styling()
+```
+
+\clearpage
+```{r mathsJournals}
+maths$aggregated %>%
+  group_by(journal_label) %>%
+  summarise(n = sum(n)) %>%
+  mutate(p = 100 * n / sum(n),
+         is_other = match(journal_label,
+                          c('Conference proceedings', 'Other journals', 'Other outputs'),
+                          0L),
+         rank = rank(p) * (is_other == 0) - is_other) %>%
+  arrange(desc(rank)) %>%
+  select(-is_other, -rank) %>%
+  knitr::kable(col.names = c('Volume title', 'Outputs', '%'),
+               caption = 'Distribution of Mathematical Sciences REF2014 submissions by containing journal (named titles contained $\\geq 30$ submissions)',
+               booktabs = TRUE, digits = 1, longtable = TRUE)
+```
+
+\clearpage
+```{r chemistryJournals}
+chemistry$aggregated %>%
+  group_by(journal_label) %>%
+  summarise(n = sum(n)) %>%
+  mutate(p = 100 * n / sum(n),
+         is_other = match(journal_label,
+                          c('Conference proceedings', 'Other journals', 'Other outputs'),
+                          0L),
+         rank = rank(p) * (is_other == 0) - is_other) %>%
+  arrange(desc(rank)) %>%
+  select(-is_other, -rank) %>%
+  knitr::kable(col.names = c('Volume title', 'Outputs', '%'),
+               caption = 'Distribution of Chemistry REF2014 submissions by containing journal (named titles contained $\\geq 30$ submissions)',
+               booktabs = TRUE, digits = 1, longtable = TRUE)
+```
+
+(ref:alphaCap) Marginal density of \(\alpha\) hyper-parameter for four chains of Hamiltonian Monte Carlo, run on 4\* and 3\*+ profiles for each field. The prior for \(\alpha\) is a normal distribution with mean zero and standard deviation 3
+
+```{r alphaDensity, fig.cap = '(ref:alphaCap)', fig.subcap = c('Economics and Econometrics', 'Mathematical Sciences', 'Physics', 'Chemistry'), fig.width = 4, fig.height = 2.4, out.width = '.75\\linewidth', fig.ncol = 1}
+plot_alpha <- function(subject) {
+  lapply(subject$samples, rstan::extract, 'alpha', permute = FALSE) %>%
+    setNames(c('4*', '3* or 4*')) %>%
+    lapply(as.data.frame) %>%
+    bind_rows(.id = 'id') %>%
+    setNames(c('id', seq_len(ncol(.) - 1))) %>%
+    group_by(id) %>% mutate(iteration = row_number()) %>%
+    tidyr::gather('chain', 'alpha', -id, -iteration) %>%
+    ggplot() + aes(alpha, colour = chain, fill = chain) +
+    geom_density(alpha = .5) +
+    xlab(expression(alpha)) +
+    facet_wrap(~id)
+}
+
+plot_alpha(economics)
+plot_alpha(maths)
+plot_alpha(physics)
+plot_alpha(chemistry)
+```
+
+(ref:traceCap) Hamiltonian Monte Carlo trace plots for different parameters in the Poisson binomial model, run on 4\* and 3\*+ profiles for each field
+
+```{r traceplots, fig.cap = '(ref:traceCap)', fig.subcap = c('Economics and Econometrics', 'Mathematical Sciences', 'Physics', 'Chemistry'), fig.width = 6, fig.height = 3, fig.ncol = 1, out.width = '.75\\linewidth'}
+plot_trace <- function(subject, pars = c('mu', 'gamma', 'alpha')) {
+  lapply(subject$samples, rstan::extract, pars, permute = FALSE) %>%
+    setNames(c('4*', '3* or 4*')) %>%
+    lapply(plyr::adply, 1:3) %>%
+    lapply(as.data.frame) %>%
+    bind_rows(.id = 'id') %>%
+    mutate(iterations = as.numeric(as.character(iterations)),
+           chains = gsub('chain\\:', '', chains)) %>%
+    ggplot() + aes(iterations, V1, colour = chains) +
+    geom_line() +
+    facet_grid(parameters ~ id, scales = 'free') +
+    ylab('value')
+}
+
+plot_trace(economics)
+plot_trace(maths)
+plot_trace(physics)
+plot_trace(chemistry)
+```
+
